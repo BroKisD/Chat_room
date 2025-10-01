@@ -18,7 +18,7 @@ func NewEventHandler(client interface{ SendMessage(*shared.Message) error }) *Ev
 
 func (h *EventHandler) HandleSendMessage(content string) error {
 	msg := &shared.Message{
-		Type:    shared.TextMessage,
+		Type:    shared.TypePublic,
 		Content: ConvertEmojis(content),
 	}
 	return h.client.SendMessage(msg)
