@@ -44,3 +44,18 @@ func (m *Manager) List() []*shared.User {
 	}
 	return users
 }
+
+func (m *Manager) GetAll() []*shared.User {
+	return m.List()
+}
+
+func (m *Manager) RemoveByUsername(username string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, user := range m.users {
+		if user.Username == username {
+			delete(m.users, id)
+			return
+		}
+	}
+}
