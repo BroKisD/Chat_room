@@ -1,35 +1,36 @@
 package shared
 
-import "net"
+import (
+	"net"
+	"time"
+)
 
 type MessageType string
 
 const (
-	TextMessage      MessageType = "text"
-	FileMessage      MessageType = "file"
-	SystemMessage    MessageType = "system"
-	MessageTypeChat  MessageType = "chat"
-	MessageTypeJoin  MessageType = "join"
-	MessageTypeLeave MessageType = "leave"
+	TypeAuth         MessageType = "auth"      // Authentication messages
+	TypeAuthResponse MessageType = "auth_resp" // Authentication response
+	TypePublic       MessageType = "public"    // Public messages
+	TypePrivate      MessageType = "private"   // Private messages
+	TypeUserList     MessageType = "user_list" // User list updates
+	TypeError        MessageType = "error"     // Error messages
+	TypeJoin         MessageType = "join"      // User join notification
+	TypeLeave        MessageType = "leave"     // User leave notification
 )
 
 type Message struct {
-	Type    MessageType   `json:"type"`
-	From    string        `json:"from,omitempty"`
-	To      string        `json:"to,omitempty"`
-	Content string        `json:"content"`
-	File    *FileMetadata `json:"file,omitempty"`
-	Sender  string        `json:"sender,omitempty"`
-}
-
-type FileMetadata struct {
-	Name        string `json:"name"`
-	Size        int64  `json:"size"`
-	ContentType string `json:"contentType"`
+	Type      MessageType `json:"type"`
+	From      string      `json:"from,omitempty"`
+	To        string      `json:"to,omitempty"`
+	Content   string      `json:"content"`
+	Timestamp time.Time   `json:"timestamp"`
+	Users     []string    `json:"users,omitempty"`   // For user list updates
+	Success   bool        `json:"success,omitempty"` // For auth responses
+	Error     string      `json:"error,omitempty"`   // For error messages
 }
 
 type User struct {
-	ID       string
-	Username string
-	Conn     net.Conn
+	Username string    `json:"username"`
+	JoinedAt time.Time `json:"joinedAt"`
+	Conn     net.Conn  `json:"-"`
 }

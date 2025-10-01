@@ -13,11 +13,20 @@ import (
 func main() {
 	client := client.New()
 
+	// Set message handler
+	client.SetMessageHandler(func(msg string) {
+		fmt.Println(msg)
+	})
+
 	// Get username
 	fmt.Print("Enter your username: ")
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
-	username := scanner.Text()
+	username := strings.TrimSpace(scanner.Text())
+
+	if username == "" {
+		log.Fatal("Username cannot be empty")
+	}
 
 	// Login
 	if err := client.Login(username); err != nil {
@@ -26,20 +35,38 @@ func main() {
 
 	// Connect to server
 	log.Println("Connecting to chat server...")
-	if err := client.Connect(":8080"); err != nil {
+	if err := client.Connect(":8088"); err != nil {
 		log.Fatal("Connection error:", err)
 	}
 	log.Println("Connected to chat server")
 
+	// Print help
+	fmt.Println("\nCommands:")
+	fmt.Println("  /w <username> <message> - Send private message")
+	fmt.Println("  quit - Exit the chat")
+	fmt.Println("\nStart typing messages:")
+
 	// Start chat loop
-	fmt.Println("Start typing messages (type 'quit' to exit)")
 	for scanner.Scan() {
 		msg := scanner.Text()
 		if strings.ToLower(msg) == "quit" {
 			break
 		}
 
-		if err := client.SendMessage(msg); err != nil {
+		var err error
+		if strings.HasPrefix(msg, "/w ") {
+			// Parse private message command
+			parts := strings.SplitN(msg, " ", 3)
+			if len(parts) < 3 {
+				fmt.Println("Invalid whisper format. Use: /w username message")
+				continue
+			}
+			err = client.SendPrivateMessage(parts[1], parts[2])
+		} else {
+			err = client.SendMessage(msg)
+		}
+
+		if err != nil {
 			log.Printf("Error sending message: %v", err)
 			break
 		}

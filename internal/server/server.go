@@ -91,23 +91,32 @@ func (s *Server) serve() error {
 }
 
 func (s *Server) handleBroadcasts() {
+	// WaitGroup to track message sending goroutines
+	var wg sync.WaitGroup
+
 	for {
 		select {
 		case <-s.done:
+			wg.Wait() // Wait for all broadcasts to complete before shutting down
 			return
 		case msg := <-s.broadcastCh:
 			s.mu.RLock()
 			users := s.users.GetAll()
 			s.mu.RUnlock()
 
+			// Start a broadcast batch
+			wg.Add(len(users))
+
 			for _, user := range users {
 				if user.Conn != nil {
-					// Use goroutine to prevent slow clients from blocking broadcasts
 					go func(u *shared.User, m *shared.Message) {
+						defer wg.Done()
 						if err := shared.WriteMessage(u.Conn, m); err != nil {
 							log.Printf("Error broadcasting to %s: %v", u.Username, err)
 						}
 					}(user, msg)
+				} else {
+					wg.Done() // Don't forget to decrease counter for nil connections
 				}
 			}
 		}
