@@ -27,6 +27,10 @@ func (c *Connection) Send(msg *shared.Message) error {
 	return shared.WriteMessage(c.conn, msg)
 }
 
+func (c *Connection) Receive() (*shared.Message, error) {
+	return shared.ReadMessage(c.conn)
+}
+
 func (c *Connection) Close() error {
 	if c.conn != nil {
 		return c.conn.Close()
