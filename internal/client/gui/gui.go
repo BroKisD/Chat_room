@@ -3,6 +3,7 @@ package gui
 import (
 	"fmt"
 	"image/color"
+	"log"
 	"strings"
 
 	"chatroom/internal/client"
@@ -17,14 +18,15 @@ import (
 )
 
 type App struct {
-	client     *client.Client
-	mainWindow fyne.Window
-	messages   *widget.RichText
-	userList   *widget.List
-	input      *widget.Entry
-	users      []string
-	connected  bool
-	msgHistory []string
+	client         *client.Client
+	mainWindow     fyne.Window
+	messages       *widget.RichText
+	messagesScroll *container.Scroll
+	userList       *widget.List
+	input          *widget.Entry
+	users          []string
+	connected      bool
+	msgHistory     []string
 }
 
 func NewApp(client *client.Client) *App {
@@ -41,18 +43,19 @@ func NewApp(client *client.Client) *App {
 }
 
 func createBorderedContainer(content fyne.CanvasObject, title string) *fyne.Container {
-	// Create a red border
-	border := canvas.NewRectangle(color.NRGBA{R: 255, A: 255})
-	border.StrokeWidth = 2
-	border.StrokeColor = color.NRGBA{R: 255, A: 255}
-	border.FillColor = color.NRGBA{R: 0, G: 0, B: 0, A: 0}
+	// Create an orange border
+	orange := color.NRGBA{R: 255, G: 140, A: 255} // orange
+	border := canvas.NewRectangle(color.White)
+	border.StrokeWidth = 3
+	border.StrokeColor = orange
+	border.FillColor = color.White
 
 	// Create title if provided
 	var titleObj fyne.CanvasObject
 	if title != "" {
-		titleText := canvas.NewText(title, color.White)
+		titleText := canvas.NewText(title, orange)
 		titleText.TextSize = 20
-		titleBg := canvas.NewRectangle(color.NRGBA{R: 255, A: 255})
+		titleBg := canvas.NewRectangle(color.White)
 		titleBg.StrokeWidth = 0
 		titleObj = container.NewStack(titleBg, titleText)
 	}
@@ -66,8 +69,9 @@ func createBorderedContainer(content fyne.CanvasObject, title string) *fyne.Cont
 
 func (a *App) Run() error {
 	fyneApp := app.NewWithID("com.chatroom.app")
+	fyneApp.Settings().SetTheme(theme.LightTheme())
 	a.mainWindow = fyneApp.NewWindow("FUV Chatroom")
-	a.mainWindow.Resize(fyne.NewSize(1000, 700))
+	a.mainWindow.Resize(fyne.NewSize(500, 600))
 
 	// Setup main UI components
 	a.setupUI()
@@ -90,8 +94,8 @@ func (a *App) Run() error {
 func (a *App) setupUI() {
 	// Message display area with rich text
 	a.messages = widget.NewRichText()
-	messagesScroll := container.NewScroll(a.messages)
-	messagesContainer := createBorderedContainer(messagesScroll, "FUV Chatroom")
+	a.messagesScroll = container.NewScroll(a.messages)
+	messagesContainer := createBorderedContainer(a.messagesScroll, "FUV Chatroom")
 
 	// User list with status indicators
 	a.userList = widget.NewList(
@@ -112,6 +116,7 @@ func (a *App) setupUI() {
 	)
 	userScroll := container.NewScroll(a.userList)
 	userContainer := createBorderedContainer(userScroll, "Active")
+	userContainer.Resize(fyne.NewSize(10, 10))
 
 	// Input area
 	a.input = widget.NewMultiLineEntry()
@@ -183,7 +188,7 @@ func (a *App) sendMessage() {
 		// Extract target and message
 		parts := strings.SplitN(text, " ", 3)
 		if len(parts) < 3 {
-			dialog.ShowError(fmt.Errorf("Invalid whisper format. Use: /w username message"), a.mainWindow)
+			dialog.ShowError(fmt.Errorf("invalid whisper format. use: /w username message"), a.mainWindow)
 			return
 		}
 		err = a.client.SendPrivateMessage(parts[1], parts[2])
@@ -216,7 +221,10 @@ func (a *App) showEmojiPicker() {
 }
 
 func (a *App) handleMessage(msg string) {
+	log.Printf("[DEBUG] GUI received message: %s", msg)
+
 	if a.messages == nil {
+		log.Printf("[ERROR] Message widget is nil, cannot display message")
 		return
 	}
 
@@ -224,6 +232,7 @@ func (a *App) handleMessage(msg string) {
 
 	// Add timestamp
 	if strings.Contains(msg, "(System)") {
+		log.Printf("[DEBUG] Processing system message")
 		segment = &widget.TextSegment{
 			Style: widget.RichTextStyle{
 				ColorName: theme.ColorNameForeground,
@@ -232,6 +241,7 @@ func (a *App) handleMessage(msg string) {
 			Text: msg + "\n",
 		}
 	} else if strings.Contains(msg, "(Private)") {
+		log.Printf("[DEBUG] Processing private message")
 		segment = &widget.TextSegment{
 			Style: widget.RichTextStyle{
 				ColorName: theme.ColorNameError,
@@ -239,6 +249,7 @@ func (a *App) handleMessage(msg string) {
 			Text: msg + "\n",
 		}
 	} else if strings.Contains(msg, "(Global)") {
+		log.Printf("[DEBUG] Processing global message")
 		segment = &widget.TextSegment{
 			Style: widget.RichTextStyle{
 				ColorName: theme.ColorNamePrimary,
@@ -246,12 +257,22 @@ func (a *App) handleMessage(msg string) {
 			Text: msg + "\n",
 		}
 	} else if strings.HasPrefix(msg, "Active users: ") {
+		log.Printf("[DEBUG] Updating user list")
 		users := strings.TrimPrefix(msg, "Active users: ")
-		a.users = strings.Split(users, ", ")
-		a.userList.Refresh()
+		fyne.DoAndWait(func() {
+			a.users = strings.Split(users, ", ")
+			log.Printf("[DEBUG] Active users updated: %v", a.users)
+			a.userList.Refresh()
+			log.Printf("[DEBUG] User list refreshed")
+		})
 		return
 	}
 
+	log.Printf("[DEBUG] Appending message segment and updating display")
 	a.messages.Segments = append(a.messages.Segments, segment)
-	a.messages.Refresh()
+	fyne.DoAndWait(func() {
+		a.messagesScroll.ScrollToBottom()
+		a.messages.Refresh()
+		log.Printf("[DEBUG] Message display updated and scrolled to bottom")
+	})
 }

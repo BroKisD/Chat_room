@@ -13,15 +13,17 @@ import (
 
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
+	addr := conn.RemoteAddr()
+	log.Printf("[INFO] New connection from %s", addr)
 
 	// Wait for authentication
 	msg, err := shared.ReadMessage(conn)
 	if err != nil {
-		log.Printf("Error reading auth message from %s: %v", conn.RemoteAddr(), err)
+		log.Printf("[ERROR] Failed to read auth message from %s: %v", addr, err)
 		return
 	}
 
-	log.Printf("New connection attempt from %s", conn.RemoteAddr())
+	log.Printf("[INFO] Received auth message from %s: %+v", addr, msg)
 
 	if msg.Type != shared.TypeAuth {
 		s.sendError(conn, "First message must be authentication")
@@ -72,11 +74,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	// Cleanup function to ensure proper goroutine cleanup
 	cleanup := func() {
-		close(done)      // Signal reader goroutine to stop
 		messageWg.Wait() // Wait for all message handlers to complete
-
-		s.users.Remove(user.Username)
 		s.broadcastUserLeave(user.Username)
+		s.users.Remove(user.Username)
+		close(done) // Signal reader goroutine to stop
 		s.broadcastUserList()
 	}
 	defer cleanup()
@@ -111,20 +112,36 @@ func (s *Server) handleConnection(conn net.Conn) {
 }
 
 func (s *Server) handleMessage(user *shared.User, msg *shared.Message) error {
+	log.Printf("[DEBUG] Handling message from user %s, type: %s, content: %s",
+		user.Username, msg.Type, msg.Content)
+
 	msg.From = user.Username
 	msg.Timestamp = time.Now()
 
 	if strings.HasPrefix(msg.Content, "/w ") {
-		return s.handlePrivateMessage(msg)
+		log.Printf("[DEBUG] Processing private message from %s", user.Username)
+		err := s.handlePrivateMessage(msg)
+		if err != nil {
+			log.Printf("[ERROR] Failed to handle private message from %s: %v", user.Username, err)
+		}
+		return err
 	} else {
-		return s.broadcastPublicMessage(msg)
+		log.Printf("[DEBUG] Broadcasting public message from %s", user.Username)
+		err := s.broadcastPublicMessage(msg)
+		if err != nil {
+			log.Printf("[ERROR] Failed to broadcast message from %s: %v", user.Username, err)
+		}
+		return err
 	}
 }
 
 func (s *Server) handlePrivateMessage(msg *shared.Message) error {
+	log.Printf("[DEBUG] Processing private message: %+v", msg)
+
 	// Parse "/w username message"
 	parts := strings.SplitN(msg.Content, " ", 3)
 	if len(parts) < 3 {
+		log.Printf("[ERROR] Invalid whisper format from %s: %s", msg.From, msg.Content)
 		s.sendError(msg.From, "Invalid whisper format. Use: /w username message")
 		return fmt.Errorf("invalid whisper format")
 	}
@@ -134,30 +151,40 @@ func (s *Server) handlePrivateMessage(msg *shared.Message) error {
 	msg.Type = shared.TypePrivate
 	msg.To = targetUsername
 
+	log.Printf("[DEBUG] Private message from %s to %s: %s",
+		msg.From, targetUsername, msg.Content)
+
 	// Find target user
 	targetUser, exists := s.users.GetByUsername(targetUsername)
 	if !exists {
+		log.Printf("[ERROR] Target user not found: %s", targetUsername)
 		s.sendError(msg.From, "User "+targetUsername+" not found")
 		return fmt.Errorf("target user not found: %s", targetUsername)
 	}
 
 	// Send to target and sender
 	if err := shared.WriteMessage(targetUser.Conn, msg); err != nil {
+		log.Printf("[ERROR] Failed to send to target %s: %v", targetUsername, err)
 		return fmt.Errorf("failed to send to target: %v", err)
 	}
+	log.Printf("[DEBUG] Message sent to target %s", targetUsername)
 
 	if sender, exists := s.users.GetByUsername(msg.From); exists {
 		if err := shared.WriteMessage(sender.Conn, msg); err != nil {
+			log.Printf("[ERROR] Failed to send confirmation to sender %s: %v", msg.From, err)
 			return fmt.Errorf("failed to send to sender: %v", err)
 		}
+		log.Printf("[DEBUG] Confirmation sent to sender %s", msg.From)
 	}
 
 	return nil
 }
 
 func (s *Server) broadcastPublicMessage(msg *shared.Message) error {
+	log.Printf("[DEBUG] Broadcasting public message from %s: %s", msg.From, msg.Content)
 	msg.Type = shared.TypePublic
 	s.broadcast(msg)
+	log.Printf("[DEBUG] Public message queued for broadcast")
 	return nil
 }
 
@@ -216,10 +243,13 @@ func (s *Server) sendAuthResponse(conn net.Conn, success bool, errorMsg string) 
 }
 
 func (s *Server) broadcast(msg *shared.Message) {
+	log.Printf("[DEBUG] Attempting to broadcast message: Type=%s, From=%s, Content=%s",
+		msg.Type, msg.From, msg.Content)
+
 	select {
 	case s.broadcastCh <- msg:
-		// Message sent successfully
+		log.Printf("[DEBUG] Message successfully queued for broadcast")
 	default:
-		log.Println("Broadcast channel full, message dropped")
+		log.Printf("[ERROR] Broadcast channel full, message dropped: %+v", msg)
 	}
 }
