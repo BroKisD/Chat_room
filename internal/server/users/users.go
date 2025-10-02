@@ -39,6 +39,7 @@ func (m *Manager) AuthenticateUser(username string, conn net.Conn) (*shared.User
 
 	// Add to active users
 	m.users[username] = user
+	fmt.Print("User authenticated: ", username, "\n")
 	return user, nil
 }
 

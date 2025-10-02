@@ -2,6 +2,7 @@ package shared
 
 import (
 	"net"
+	"sync"
 	"time"
 )
 
@@ -33,4 +34,11 @@ type User struct {
 	Username string    `json:"username"`
 	JoinedAt time.Time `json:"joinedAt"`
 	Conn     net.Conn  `json:"-"`
+	writeMu  sync.Mutex
+}
+
+func (u *User) WriteMessage(msg *Message) error {
+	u.writeMu.Lock()
+	defer u.writeMu.Unlock()
+	return WriteMessage(u.Conn, msg)
 }

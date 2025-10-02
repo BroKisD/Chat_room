@@ -100,6 +100,8 @@ func (s *Server) handleBroadcasts() {
 			wg.Wait() // Wait for all broadcasts to complete before shutting down
 			return
 		case msg := <-s.broadcastCh:
+			log.Printf("[BROADCAST] New message: %+v", msg)
+
 			s.mu.RLock()
 			users := s.users.GetAll()
 			s.mu.RUnlock()
@@ -117,12 +119,9 @@ func (s *Server) handleBroadcasts() {
 					}(user, msg)
 				} else {
 					wg.Done() // Don't forget to decrease counter for nil connections
+					log.Printf("[WARN] User %s has a nil connection, skipping broadcast", user.Username)
 				}
 			}
 		}
 	}
 }
-
-// func (s *Server) handleConnection(conn net.Conn) {
-// 	// Implementation handled in handler.go
-// }
