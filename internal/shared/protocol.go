@@ -3,21 +3,23 @@ package shared
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 )
 
-func ReadMessage(r io.Reader) (*Message, error) {
-	reader := bufio.NewReader(r)
-
-	// Read one line (until \n)
+func ReadMessage(reader *bufio.Reader) (*Message, error) {
 	line, err := reader.ReadString('\n')
 	if err != nil {
+		if err == io.EOF {
+			return nil, err
+		}
+		fmt.Println("[ERROR] Read from server:", err)
 		return nil, err
 	}
 
-	// Parse JSON
 	var msg Message
 	if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		fmt.Println("[ERROR] Failed to unmarshal JSON:", err, "Line:", line)
 		return nil, err
 	}
 

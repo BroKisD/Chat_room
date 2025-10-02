@@ -2,7 +2,6 @@ package client
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -43,18 +42,12 @@ func (c *Client) Connect(address string) error {
 		return fmt.Errorf("auth failed: %v", err)
 	}
 
-	// Wait for auth response
-	msg, err := c.conn.Receive()
-	if err != nil {
-		return fmt.Errorf("auth response error: %v", err)
+	authResp := <-c.conn.Incoming()
+	if authResp.Type != shared.TypeAuthResponse {
+		return fmt.Errorf("unexpected response type: %s", authResp.Type)
 	}
-
-	if msg.Type != shared.TypeAuthResponse {
-		return fmt.Errorf("unexpected response type: %s", msg.Type)
-	}
-
-	if !msg.Success {
-		return fmt.Errorf("authentication failed: %s", msg.Error)
+	if !authResp.Success {
+		return fmt.Errorf("authentication failed: %s", authResp.Error)
 	}
 
 	// Start message listener
@@ -106,13 +99,7 @@ func (c *Client) GetActiveUsers() []string {
 }
 
 func (c *Client) handleMessages() {
-	for {
-		msg, err := c.conn.Receive()
-		if err != nil {
-			log.Printf("Error receiving message: %v", err)
-			return
-		}
-
+	for msg := range c.conn.Incoming() {
 		switch msg.Type {
 		case shared.TypePublic:
 			c.formatAndDisplayMessage(msg)

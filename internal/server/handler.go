@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -16,8 +18,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 	addr := conn.RemoteAddr()
 	log.Printf("[INFO] New connection from %s", addr)
 
-	// Wait for authentication
-	msg, err := shared.ReadMessage(conn)
+	reader := bufio.NewReader(conn)
+	msg, err := shared.ReadMessage(reader)
+
 	if err != nil {
 		log.Printf("[ERROR] Failed to read auth message from %s: %v", addr, err)
 		return
@@ -40,49 +43,54 @@ func (s *Server) handleConnection(conn net.Conn) {
 	// Send successful auth response
 	s.sendAuthResponse(conn, true, "")
 
+	// Notify others about new users
+	s.broadcastUserJoin(user.Username)
+	log.Printf("[INFO] User %s joined from %s", user.Username, addr)
+
 	// Broadcast user list update
 	s.broadcastUserList()
+	log.Printf("[INFO] Sent user list to %s", user.Username)
 
-	// Notify others about new user
-	s.broadcastUserJoin(user.Username)
-
-	// Message handling loop
-	msgChan := make(chan *shared.Message)
-	errChan := make(chan error)
-	done := make(chan struct{})
+	msgChan := make(chan *shared.Message, 100) // Buffered to prevent blocking
+	errChan := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
 	var messageWg sync.WaitGroup
 
 	// Start message reader goroutine
 	go func() {
 		defer close(msgChan)
 		defer close(errChan)
-
+		reader := bufio.NewReader(conn) // thêm dòng này
 		for {
 			select {
-			case <-done:
+			case <-ctx.Done():
 				return
 			default:
-				msg, err := shared.ReadMessage(conn)
-				if err != nil {
-					errChan <- err
-					return
-				}
-				msgChan <- msg
 			}
+
+			conn.SetReadDeadline(time.Now().Add(1000 * time.Millisecond))
+			msg, err := shared.ReadMessage(reader) // dùng reader
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue
+				}
+				errChan <- err
+				return
+			}
+			msgChan <- msg
 		}
 	}()
 
-	// Cleanup function to ensure proper goroutine cleanup
+	// Cleanup function
 	cleanup := func() {
-		messageWg.Wait() // Wait for all message handlers to complete
+		cancel()         // Signal reader to stop
+		messageWg.Wait() // Wait for message handlers
 		s.broadcastUserLeave(user.Username)
 		s.users.Remove(user.Username)
-		close(done) // Signal reader goroutine to stop
 		s.broadcastUserList()
 	}
 	defer cleanup()
 
-	// Handle messages
 	for {
 		select {
 		case err, ok := <-errChan:
@@ -96,8 +104,6 @@ func (s *Server) handleConnection(conn net.Conn) {
 				return
 			}
 			msg.Timestamp = time.Now()
-
-			// Process message in a separate goroutine
 			messageWg.Add(1)
 			go func(m *shared.Message) {
 				defer messageWg.Done()
@@ -120,29 +126,32 @@ func (s *Server) handleMessage(user *shared.User, msg *shared.Message) error {
 
 	if strings.HasPrefix(msg.Content, "/w ") {
 		log.Printf("[DEBUG] Processing private message from %s", user.Username)
-		err := s.handlePrivateMessage(msg)
+		err := s.handlePrivateMessage(user, msg) // Pass user object
 		if err != nil {
 			log.Printf("[ERROR] Failed to handle private message from %s: %v", user.Username, err)
 		}
 		return err
-	} else {
+	} else if msg.Type == shared.TypePublic {
 		log.Printf("[DEBUG] Broadcasting public message from %s", user.Username)
 		err := s.broadcastPublicMessage(msg)
 		if err != nil {
 			log.Printf("[ERROR] Failed to broadcast message from %s: %v", user.Username, err)
 		}
 		return err
+	} else {
+		log.Printf("[WARN] Unknown message type %s from %s", msg.Type, user.Username)
+		return nil
 	}
 }
 
-func (s *Server) handlePrivateMessage(msg *shared.Message) error {
-	log.Printf("[DEBUG] Processing private message: %+v", msg)
+func (s *Server) handlePrivateMessage(user *shared.User, msg *shared.Message) error {
+	log.Printf("[DEBU] Processing private message: %+v", msg)
 
-	// Parse "/w username message"
 	parts := strings.SplitN(msg.Content, " ", 3)
 	if len(parts) < 3 {
 		log.Printf("[ERROR] Invalid whisper format from %s: %s", msg.From, msg.Content)
-		s.sendError(msg.From, "Invalid whisper format. Use: /w username message")
+		// Use the user's connection directly instead of lookup
+		s.sendErrorToConn(user.Conn, "Invalid whisper format. Use: /w username message")
 		return fmt.Errorf("invalid whisper format")
 	}
 
@@ -158,24 +167,23 @@ func (s *Server) handlePrivateMessage(msg *shared.Message) error {
 	targetUser, exists := s.users.GetByUsername(targetUsername)
 	if !exists {
 		log.Printf("[ERROR] Target user not found: %s", targetUsername)
-		s.sendError(msg.From, "User "+targetUsername+" not found")
+		s.sendErrorToConn(user.Conn, "User "+targetUsername+" not found")
 		return fmt.Errorf("target user not found: %s", targetUsername)
 	}
 
-	// Send to target and sender
-	if err := shared.WriteMessage(targetUser.Conn, msg); err != nil {
+	// Use thread-safe write
+	if err := targetUser.WriteMessage(msg); err != nil {
 		log.Printf("[ERROR] Failed to send to target %s: %v", targetUsername, err)
 		return fmt.Errorf("failed to send to target: %v", err)
 	}
 	log.Printf("[DEBUG] Message sent to target %s", targetUsername)
 
-	if sender, exists := s.users.GetByUsername(msg.From); exists {
-		if err := shared.WriteMessage(sender.Conn, msg); err != nil {
-			log.Printf("[ERROR] Failed to send confirmation to sender %s: %v", msg.From, err)
-			return fmt.Errorf("failed to send to sender: %v", err)
-		}
-		log.Printf("[DEBUG] Confirmation sent to sender %s", msg.From)
+	// Send to sender using their connection directly
+	if err := user.WriteMessage(msg); err != nil {
+		log.Printf("[ERROR] Failed to send confirmation to sender %s: %v", msg.From, err)
+		return fmt.Errorf("failed to send to sender: %v", err)
 	}
+	log.Printf("[DEBUG] Confirmation sent to sender %s", msg.From)
 
 	return nil
 }
@@ -252,4 +260,13 @@ func (s *Server) broadcast(msg *shared.Message) {
 	default:
 		log.Printf("[ERROR] Broadcast channel full, message dropped: %+v", msg)
 	}
+}
+
+func (s *Server) sendErrorToConn(conn net.Conn, errMsg string) {
+	msg := &shared.Message{
+		Type:      shared.TypeError,
+		Content:   errMsg,
+		Timestamp: time.Now(),
+	}
+	shared.WriteMessage(conn, msg)
 }

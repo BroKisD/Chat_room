@@ -27,6 +27,7 @@ type App struct {
 	users          []string
 	connected      bool
 	msgHistory     []string
+	incoming       chan string
 }
 
 func NewApp(client *client.Client) *App {
@@ -34,10 +35,15 @@ func NewApp(client *client.Client) *App {
 		client:     client,
 		msgHistory: make([]string, 0),
 		users:      make([]string, 0),
+		incoming:   make(chan string, 100),
 	}
 
-	// Set message handler
-	client.SetMessageHandler(a.handleMessage)
+	client.SetMessageHandler(func(msg string) {
+		fmt.Println("[DEBUG] Raw from server:", msg)
+		a.incoming <- msg
+	})
+
+	go a.dispatchMessages()
 
 	return a
 }
@@ -220,59 +226,36 @@ func (a *App) showEmojiPicker() {
 	dialog.ShowCustom("Emojis", "Close", emojiGrid, a.mainWindow)
 }
 
-func (a *App) handleMessage(msg string) {
-	log.Printf("[DEBUG] GUI received message: %s", msg)
-
-	if a.messages == nil {
-		log.Printf("[ERROR] Message widget is nil, cannot display message")
-		return
-	}
-
-	var segment widget.RichTextSegment
-
-	// Add timestamp
-	if strings.Contains(msg, "(System)") {
-		log.Printf("[DEBUG] Processing system message")
-		segment = &widget.TextSegment{
-			Style: widget.RichTextStyle{
-				ColorName: theme.ColorNameForeground,
-				TextStyle: fyne.TextStyle{Italic: true},
-			},
-			Text: msg + "\n",
-		}
-	} else if strings.Contains(msg, "(Private)") {
-		log.Printf("[DEBUG] Processing private message")
-		segment = &widget.TextSegment{
-			Style: widget.RichTextStyle{
-				ColorName: theme.ColorNameError,
-			},
-			Text: msg + "\n",
-		}
-	} else if strings.Contains(msg, "(Global)") {
-		log.Printf("[DEBUG] Processing global message")
-		segment = &widget.TextSegment{
-			Style: widget.RichTextStyle{
-				ColorName: theme.ColorNamePrimary,
-			},
-			Text: msg + "\n",
-		}
-	} else if strings.HasPrefix(msg, "Active users: ") {
-		log.Printf("[DEBUG] Updating user list")
-		users := strings.TrimPrefix(msg, "Active users: ")
-		fyne.DoAndWait(func() {
-			a.users = strings.Split(users, ", ")
-			log.Printf("[DEBUG] Active users updated: %v", a.users)
-			a.userList.Refresh()
-			log.Printf("[DEBUG] User list refreshed")
+func (a *App) dispatchMessages() {
+	for msg := range a.incoming {
+		log.Println("Received message:", msg)
+		fyne.CurrentApp().SendNotification(&fyne.Notification{
+			Title:   "New Message",
+			Content: msg,
 		})
+
+		fyne.DoAndWait(func() {
+			a.processMessage(msg)
+			log.Println("Processed message in UI thread")
+		})
+	}
+}
+
+func (a *App) processMessage(msg string) {
+	if strings.HasPrefix(msg, "Active users: ") {
+		users := strings.TrimPrefix(msg, "Active users: ")
+		a.users = strings.Split(users, ", ")
+		a.userList.Refresh()
 		return
 	}
 
-	log.Printf("[DEBUG] Appending message segment and updating display")
+	segment := &widget.TextSegment{
+		Style: widget.RichTextStyle{
+			ColorName: theme.ColorNameForeground,
+		},
+		Text: msg + "\n",
+	}
 	a.messages.Segments = append(a.messages.Segments, segment)
-	fyne.DoAndWait(func() {
-		a.messagesScroll.ScrollToBottom()
-		a.messages.Refresh()
-		log.Printf("[DEBUG] Message display updated and scrolled to bottom")
-	})
+	a.messages.Refresh()
+	a.messagesScroll.ScrollToBottom()
 }
