@@ -125,10 +125,9 @@ func (c *Client) formatAndDisplayMessage(msg *shared.Message) {
 }
 
 func (c *Client) formatAndDisplayPrivateMessage(msg *shared.Message) {
-	formatted := fmt.Sprintf("(Private) (%s) %s -> %s: %s",
+	formatted := fmt.Sprintf("(Private) (%s) %s: %s",
 		msg.Timestamp.Format("15:04:05"),
 		msg.From,
-		msg.To,
 		msg.Content)
 	c.displayMessage(formatted)
 }

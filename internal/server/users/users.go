@@ -3,6 +3,7 @@ package users
 import (
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,21 +26,26 @@ func (m *Manager) AuthenticateUser(username string, conn net.Conn) (*shared.User
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Normalize username
+	norm := strings.TrimSpace(username)
+	norm = strings.TrimPrefix(norm, "@")
+	norm = strings.ToLower(norm)
+
 	// Check for duplicate username
-	if _, exists := m.users[username]; exists {
-		return nil, fmt.Errorf("username %s is already taken", username)
+	if _, exists := m.users[norm]; exists {
+		return nil, fmt.Errorf("username %s is already taken", norm)
 	}
 
 	// Create new user
 	user := &shared.User{
-		Username: username,
+		Username: norm,
 		JoinedAt: time.Now(),
 		Conn:     conn,
 	}
 
 	// Add to active users
-	m.users[username] = user
-	fmt.Print("User authenticated: ", username, "\n")
+	m.users[norm] = user
+	fmt.Print("User authenticated: ", norm, "\n")
 	return user, nil
 }
 

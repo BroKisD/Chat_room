@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -60,7 +59,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	go func() {
 		defer close(msgChan)
 		defer close(errChan)
-		reader := bufio.NewReader(conn) // thêm dòng này
+		reader := bufio.NewReader(conn)
 		for {
 			select {
 			case <-ctx.Done():
@@ -69,7 +68,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 
 			conn.SetReadDeadline(time.Now().Add(1000 * time.Millisecond))
-			msg, err := shared.ReadMessage(reader) // dùng reader
+			msg, err := shared.ReadMessage(reader)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
@@ -124,7 +123,7 @@ func (s *Server) handleMessage(user *shared.User, msg *shared.Message) error {
 	msg.From = user.Username
 	msg.Timestamp = time.Now()
 
-	if strings.HasPrefix(msg.Content, "/w ") {
+	if msg.Type == shared.TypePrivate {
 		log.Printf("[DEBUG] Processing private message from %s", user.Username)
 		err := s.handlePrivateMessage(user, msg) // Pass user object
 		if err != nil {
@@ -145,26 +144,28 @@ func (s *Server) handleMessage(user *shared.User, msg *shared.Message) error {
 }
 
 func (s *Server) handlePrivateMessage(user *shared.User, msg *shared.Message) error {
-	log.Printf("[DEBU] Processing private message: %+v", msg)
-
-	parts := strings.SplitN(msg.Content, " ", 3)
-	if len(parts) < 3 {
-		log.Printf("[ERROR] Invalid whisper format from %s: %s", msg.From, msg.Content)
-		// Use the user's connection directly instead of lookup
-		s.sendErrorToConn(user.Conn, "Invalid whisper format. Use: /w username message")
-		return fmt.Errorf("invalid whisper format")
-	}
-
-	targetUsername := parts[1]
-	msg.Content = parts[2]
+	targetUsername := msg.To
 	msg.Type = shared.TypePrivate
 	msg.To = targetUsername
+
+	if targetUsername == msg.From {
+		s.sendErrorToConn(user.Conn, "Cannot send private message to yourself")
+		return fmt.Errorf("user %s attempted to message themselves", msg.From)
+	}
 
 	log.Printf("[DEBUG] Private message from %s to %s: %s",
 		msg.From, targetUsername, msg.Content)
 
 	// Find target user
 	targetUser, exists := s.users.GetByUsername(targetUsername)
+	log.Printf("[DEBUG] Target raw: %q bytes=%v", targetUsername, []byte(targetUsername))
+
+	for _, u := range s.users.GetAll() {
+		// giả sử mỗi user có trường Username
+		log.Printf("[DEBUG] user: username=%q addr=%p", u.Username, u)
+	}
+
+	log.Printf("[DEBUG] Lookup for target user %s: exists=%v", targetUsername, exists)
 	if !exists {
 		log.Printf("[ERROR] Target user not found: %s", targetUsername)
 		s.sendErrorToConn(user.Conn, "User "+targetUsername+" not found")
