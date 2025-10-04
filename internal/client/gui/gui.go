@@ -127,7 +127,13 @@ func (a *App) setupUI() {
 	// Input area
 	a.input = widget.NewMultiLineEntry()
 	a.input.SetPlaceHolder("Type your message...")
-	sendBtn := widget.NewButtonWithIcon("Send", theme.MailSendIcon(), a.sendMessage)
+
+	sendBtn := widget.NewButtonWithIcon("Send", theme.MailSendIcon(), func() {
+		content := a.input.Text
+		content = ConvertEmojis(content)
+		a.sendMessageWithContent(content)
+	})
+
 	emojiBtn := widget.NewButton("☺", a.showEmojiPicker)
 
 	inputBox := container.NewBorder(
@@ -135,6 +141,7 @@ func (a *App) setupUI() {
 		emojiBtn, sendBtn,
 		a.input,
 	)
+
 	inputContainer := createBorderedContainer(inputBox, "")
 
 	// Layout
@@ -183,47 +190,27 @@ func (a *App) showLoginDialog() {
 	}, a.mainWindow)
 }
 
-func (a *App) sendMessage() {
-	text := strings.TrimSpace(a.input.Text)
-	if text == "" {
-		return
-	}
-
-	var err error
-	if strings.HasPrefix(text, "/w ") {
-		// Extract target and message
-		parts := strings.SplitN(text, " ", 3)
-		if len(parts) < 3 {
-			dialog.ShowError(fmt.Errorf("invalid whisper format. use: /w username message"), a.mainWindow)
-			return
-		}
-		err = a.client.SendPrivateMessage(parts[1], parts[2])
-	} else {
-		err = a.client.SendMessage(text)
-	}
-
-	if err != nil {
-		dialog.ShowError(err, a.mainWindow)
-		return
-	}
-
-	a.input.SetText("")
-}
-
 func (a *App) showEmojiPicker() {
-	// Simple emoji picker
-	emojis := []string{"😊", "❤️", "👍", "😀", "😃", "😄", "😁", "😅", "😂", "🤣"}
-	emojiButtons := make([]fyne.CanvasObject, len(emojis))
+	emojis := GetEmojiList()
+	emojiButtons := make([]fyne.CanvasObject, 0, len(emojis))
 
-	for i, emoji := range emojis {
-		e := emoji // Create a new variable for closure
-		emojiButtons[i] = widget.NewButton(e, func() {
+	for _, emoji := range emojis {
+		e := emoji
+		emojiButtons = append(emojiButtons, widget.NewButton(e, func() {
 			a.input.SetText(a.input.Text + e)
-		})
+		}))
 	}
 
 	emojiGrid := container.NewGridWithColumns(5, emojiButtons...)
 	dialog.ShowCustom("Emojis", "Close", emojiGrid, a.mainWindow)
+}
+
+func GetEmojiList() []string {
+	emojis := make([]string, 0, len(emojiMap))
+	for _, v := range emojiMap {
+		emojis = append(emojis, v)
+	}
+	return emojis
 }
 
 func (a *App) dispatchMessages() {
@@ -258,4 +245,14 @@ func (a *App) processMessage(msg string) {
 	a.messages.Segments = append(a.messages.Segments, segment)
 	a.messages.Refresh()
 	a.messagesScroll.ScrollToBottom()
+}
+
+func (a *App) sendMessageWithContent(content string) {
+	if content == "" {
+		return
+	}
+	if err := a.client.SendMessage(content); err != nil {
+		log.Println("Send error:", err)
+	}
+	a.input.SetText("")
 }
