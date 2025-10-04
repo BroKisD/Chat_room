@@ -5,10 +5,11 @@ import (
 )
 
 var emojiMap = map[string]string{
-	":smile:":    "😊",
-	":heart:":    "❤️",
-	":thumbsup:": "👍",
-	// Add more emoji mappings
+	":)":     "😊",
+	"<3":     "❤️",
+	":like:": "👍",
+	"XD":     "😂",
+	":(":     "😢",
 }
 
 func ConvertEmojis(text string) string {
