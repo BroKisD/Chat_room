@@ -62,21 +62,31 @@ func (c *Client) Login(username string) error {
 }
 
 func (c *Client) SendMessage(content string) error {
+	encryptedContent, err := shared.Encrypt(content)
+	if err != nil {
+		return err
+	}
+
 	msg := &shared.Message{
 		Type:      shared.TypePublic,
 		From:      c.username,
-		Content:   content,
+		Content:   encryptedContent,
 		Timestamp: time.Now(),
 	}
 	return c.conn.Send(msg)
 }
 
 func (c *Client) SendPrivateMessage(target, content string) error {
+	encryptedContent, err := shared.Encrypt(content)
+	if err != nil {
+		return err
+	}
+
 	msg := &shared.Message{
 		Type:      shared.TypePrivate,
 		From:      c.username,
 		To:        target,
-		Content:   content,
+		Content:   encryptedContent,
 		Timestamp: time.Now(),
 	}
 	return c.conn.Send(msg)
@@ -100,6 +110,13 @@ func (c *Client) GetActiveUsers() []string {
 
 func (c *Client) handleMessages() {
 	for msg := range c.conn.Incoming() {
+		if msg.Content != "" {
+			decrypted, err := shared.Decrypt(msg.Content)
+			if err == nil {
+				msg.Content = decrypted
+			}
+		}
+
 		switch msg.Type {
 		case shared.TypePublic:
 			c.formatAndDisplayMessage(msg)
