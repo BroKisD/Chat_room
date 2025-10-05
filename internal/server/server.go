@@ -20,6 +20,7 @@ type Server struct {
 	broadcastCh chan *shared.Message
 	done        chan struct{}
 	connections sync.WaitGroup
+	roomKey     []byte
 }
 
 func New(addr string) *Server {
@@ -29,6 +30,7 @@ func New(addr string) *Server {
 		users:       users.New(),
 		broadcastCh: make(chan *shared.Message, 100), // Buffer for 100 messages
 		done:        make(chan struct{}),
+		roomKey:     shared.GenerateRoomKey(),
 	}
 }
 

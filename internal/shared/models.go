@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"crypto/rsa"
 	"net"
 	"sync"
 	"time"
@@ -17,24 +18,29 @@ const (
 	TypeError        MessageType = "error"     // Error messages
 	TypeJoin         MessageType = "join"      // User join notification
 	TypeLeave        MessageType = "leave"     // User leave notification
+	TypePublicKey    MessageType = "public_key"
+	TypeRoomKey      MessageType = "room_key"
 )
 
 type Message struct {
-	Type      MessageType `json:"type"`
-	From      string      `json:"from,omitempty"`
-	To        string      `json:"to,omitempty"`
-	Content   string      `json:"content"`
-	Timestamp time.Time   `json:"timestamp"`
-	Users     []string    `json:"users,omitempty"`   // For user list updates
-	Success   bool        `json:"success,omitempty"` // For auth responses
-	Error     string      `json:"error,omitempty"`   // For error messages
+	Type          MessageType `json:"type"`
+	From          string      `json:"from,omitempty"`
+	To            string      `json:"to,omitempty"`
+	Content       string      `json:"content"`
+	Timestamp     time.Time   `json:"timestamp"`
+	Users         []string    `json:"users,omitempty"`          // For user list updates
+	Success       bool        `json:"success,omitempty"`        // For auth responses
+	Error         string      `json:"error,omitempty"`          // For error messages
+	EncryptedKey  string      `json:"encrypted_key,omitempty"`  // base64 of RSA-encrypted AES key
+	EncryptedData string      `json:"encrypted_data,omitempty"` // base64 of AES-encrypted content
 }
 
 type User struct {
-	Username string    `json:"username"`
-	JoinedAt time.Time `json:"joinedAt"`
-	Conn     net.Conn  `json:"-"`
-	writeMu  sync.Mutex
+	Username  string    `json:"username"`
+	JoinedAt  time.Time `json:"joinedAt"`
+	Conn      net.Conn  `json:"-"`
+	writeMu   sync.Mutex
+	PublicKey *rsa.PublicKey `json:"-"`
 }
 
 func (u *User) WriteMessage(msg *Message) error {

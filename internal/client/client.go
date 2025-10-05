@@ -1,6 +1,8 @@
 package client
 
 import (
+	"crypto/rsa"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +16,9 @@ type Client struct {
 	username    string
 	activeUsers []string
 	onMessage   func(msg string)
+	privateKey  *rsa.PrivateKey
+	publicKey   *rsa.PublicKey
+	roomKey     []byte
 }
 
 func New() *Client {
@@ -37,7 +42,6 @@ func (c *Client) Connect(address string) error {
 		From:    c.username,
 		Content: "auth",
 	}
-
 	if err := c.conn.Send(authMsg); err != nil {
 		return fmt.Errorf("auth failed: %v", err)
 	}
@@ -50,7 +54,24 @@ func (c *Client) Connect(address string) error {
 		return fmt.Errorf("authentication failed: %s", authResp.Error)
 	}
 
+	priv, pub, err := shared.GenerateRSAKeyPair(2048)
+	if err != nil {
+		fmt.Printf("failed to generate RSA keys: %v", err)
+		return err
+	}
+	c.privateKey = priv
+	c.publicKey = pub
+
+	pemPub, _ := shared.PublicKeyToPEM(pub)
+	msg := &shared.Message{
+		Type:    shared.TypePublicKey,
+		From:    c.username,
+		Content: string(pemPub),
+	}
+	c.conn.Send(msg)
+
 	// Start message listener
+	fmt.Print("Public key of client: \n", string(pemPub), "\n")
 	go c.handleMessages()
 
 	return nil
@@ -62,32 +83,33 @@ func (c *Client) Login(username string) error {
 }
 
 func (c *Client) SendMessage(content string) error {
-	encryptedContent, err := shared.Encrypt(content)
+	_, encDataB64, err := shared.EncryptWithRoomKey(content, c.roomKey)
 	if err != nil {
 		return err
 	}
 
 	msg := &shared.Message{
-		Type:      shared.TypePublic,
-		From:      c.username,
-		Content:   encryptedContent,
-		Timestamp: time.Now(),
+		Type:          shared.TypePublic,
+		From:          c.username,
+		EncryptedData: encDataB64,
+		Timestamp:     time.Now(),
 	}
 	return c.conn.Send(msg)
 }
 
 func (c *Client) SendPrivateMessage(target, content string) error {
-	encryptedContent, err := shared.Encrypt(content)
+	encKeyB64, encDataB64, err := shared.Encrypt(content, c.publicKey)
 	if err != nil {
 		return err
 	}
 
 	msg := &shared.Message{
-		Type:      shared.TypePrivate,
-		From:      c.username,
-		To:        target,
-		Content:   encryptedContent,
-		Timestamp: time.Now(),
+		Type:         shared.TypePrivate,
+		From:         c.username,
+		To:           target,
+		Content:      encDataB64,
+		EncryptedKey: encKeyB64,
+		Timestamp:    time.Now(),
 	}
 	return c.conn.Send(msg)
 }
@@ -110,14 +132,10 @@ func (c *Client) GetActiveUsers() []string {
 
 func (c *Client) handleMessages() {
 	for msg := range c.conn.Incoming() {
-		if msg.Content != "" {
-			decrypted, err := shared.Decrypt(msg.Content)
-			if err == nil {
-				msg.Content = decrypted
-			}
-		}
 
 		switch msg.Type {
+		case shared.TypeRoomKey:
+			c.handleRoomKey(msg)
 		case shared.TypePublic:
 			c.formatAndDisplayMessage(msg)
 		case shared.TypePrivate:
@@ -134,10 +152,15 @@ func (c *Client) handleMessages() {
 }
 
 func (c *Client) formatAndDisplayMessage(msg *shared.Message) {
+	msgContent, err := shared.DecryptWithRoomKey(msg.EncryptedData, c.roomKey)
+	if err != nil {
+		fmt.Println("Failed to decrypt message:", err)
+		return
+	}
 	formatted := fmt.Sprintf("(Global) (%s) %s: %s",
 		msg.Timestamp.Format("15:04:05"),
 		msg.From,
-		msg.Content)
+		msgContent)
 	c.displayMessage(formatted)
 }
 
@@ -173,4 +196,17 @@ func (c *Client) displayMessage(msg string) {
 	} else {
 		fmt.Println(msg)
 	}
+}
+
+func (c *Client) handleRoomKey(msg *shared.Message) {
+	c.roomKey = shared.DecryptRoomKey(msg.EncryptedKey, c.privateKey)
+	fmt.Print("User ", c.username, " received room key.\n")
+	fmt.Printf("Decrypt using roomKey: %s", base64.StdEncoding.EncodeToString(c.roomKey))
+	if c.roomKey == nil {
+		fmt.Println("Failed to obtain room key")
+		return
+	}
+	fmt.Print("Decrypted room key: ", c.roomKey, "\n")
+
+	// Here you would typically store the room key for later use
 }

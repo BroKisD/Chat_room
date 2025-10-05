@@ -1,6 +1,7 @@
 package users
 
 import (
+	"crypto/rsa"
 	"fmt"
 	"net"
 	"strings"
@@ -84,4 +85,22 @@ func (m *Manager) GetAll() []*shared.User {
 		users = append(users, user)
 	}
 	return users
+}
+
+func (m *Manager) SetPublicKey(username string, pubKey *rsa.PublicKey) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if user, exists := m.users[username]; exists {
+		user.PublicKey = pubKey
+	}
+}
+func (m *Manager) GetPublicKey(username string) (*rsa.PublicKey, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if user, exists := m.users[username]; exists && user.PublicKey != nil {
+		return user.PublicKey, true
+	}
+	return nil, false
 }
