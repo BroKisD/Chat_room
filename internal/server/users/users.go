@@ -104,3 +104,16 @@ func (m *Manager) GetPublicKey(username string) (*rsa.PublicKey, bool) {
 	}
 	return nil, false
 }
+
+func (m *Manager) GetAllPublicKeys() map[string]*rsa.PublicKey {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	pubKeys := make(map[string]*rsa.PublicKey)
+	for username, user := range m.users {
+		if user.PublicKey != nil {
+			pubKeys[username] = user.PublicKey
+		}
+	}
+	return pubKeys
+}

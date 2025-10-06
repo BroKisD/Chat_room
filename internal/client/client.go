@@ -1,29 +1,34 @@
 package client
 
 import (
+	"chatroom/internal/client/networking"
+	"chatroom/internal/shared"
 	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
-
-	"chatroom/internal/client/networking"
-	"chatroom/internal/shared"
 )
 
 type Client struct {
-	conn        *networking.Connection
-	username    string
-	activeUsers []string
-	onMessage   func(msg string)
-	privateKey  *rsa.PrivateKey
-	publicKey   *rsa.PublicKey
-	roomKey     []byte
+	conn              *networking.Connection
+	username          string
+	activeUsers       []string
+	onMessage         func(msg string)
+	privateKey        *rsa.PrivateKey
+	publicKey         *rsa.PublicKey
+	roomKey           []byte
+	PublicKeyCache    *PublicKeyCache
+	PendingPrivateMsg map[string][]string
+	mu                sync.Mutex
 }
 
 func New() *Client {
 	return &Client{
-		conn: networking.NewConnection(),
+		conn:              networking.NewConnection(),
+		PublicKeyCache:    NewPublicKeyCache(),
+		PendingPrivateMsg: make(map[string][]string),
 	}
 }
 
@@ -83,6 +88,9 @@ func (c *Client) Login(username string) error {
 }
 
 func (c *Client) SendMessage(content string) error {
+	c.displayMessage(fmt.Sprintf("(You) (%s): %s",
+		time.Now().Format("15:04:05"), content))
+
 	_, encDataB64, err := shared.EncryptWithRoomKey(content, c.roomKey)
 	if err != nil {
 		return err
@@ -98,7 +106,28 @@ func (c *Client) SendMessage(content string) error {
 }
 
 func (c *Client) SendPrivateMessage(target, content string) error {
-	encKeyB64, encDataB64, err := shared.Encrypt(content, c.publicKey)
+	target = strings.TrimSpace(target)
+
+	if target == c.username {
+		return fmt.Errorf("cannot send private message to yourself")
+	}
+
+	targetPubKey, exists := c.PublicKeyCache.Get(target)
+	if !exists {
+
+		c.mu.Lock()
+		c.PendingPrivateMsg[target] = append(c.PendingPrivateMsg[target], content)
+		c.mu.Unlock()
+
+		req := &shared.Message{
+			Type: shared.TypePublicKeyRequest,
+			From: c.username,
+			To:   target,
+		}
+		return c.conn.Send(req)
+	}
+
+	encKeyB64, encDataB64, err := shared.Encrypt(content, targetPubKey)
 	if err != nil {
 		return err
 	}
@@ -107,10 +136,13 @@ func (c *Client) SendPrivateMessage(target, content string) error {
 		Type:         shared.TypePrivate,
 		From:         c.username,
 		To:           target,
-		Content:      encDataB64,
 		EncryptedKey: encKeyB64,
+		Content:      encDataB64,
 		Timestamp:    time.Now(),
 	}
+	c.displayMessage(fmt.Sprintf("(You) (%s): %s",
+		time.Now().Format("15:04:05"), content))
+
 	return c.conn.Send(msg)
 }
 
@@ -133,12 +165,17 @@ func (c *Client) GetActiveUsers() []string {
 func (c *Client) handleMessages() {
 	for msg := range c.conn.Incoming() {
 
+		if msg.From == c.username {
+			continue
+		}
+
 		switch msg.Type {
 		case shared.TypeRoomKey:
 			c.handleRoomKey(msg)
 		case shared.TypePublic:
 			c.formatAndDisplayMessage(msg)
 		case shared.TypePrivate:
+			msg := c.DecryptPrivateMessage(msg)
 			c.formatAndDisplayPrivateMessage(msg)
 		case shared.TypeUserList:
 			c.activeUsers = msg.Users
@@ -147,11 +184,19 @@ func (c *Client) handleMessages() {
 			c.displaySystemMessage(msg)
 		case shared.TypeError:
 			c.displayErrorMessage(msg)
+		case shared.TypePublicKeyResponse:
+			c.handlePublicKeyResponse(msg)
 		}
 	}
 }
 
 func (c *Client) formatAndDisplayMessage(msg *shared.Message) {
+	if msg == nil {
+		return
+	}
+	if msg.From == c.username {
+		return
+	}
 	msgContent, err := shared.DecryptWithRoomKey(msg.EncryptedData, c.roomKey)
 	if err != nil {
 		fmt.Println("Failed to decrypt message:", err)
@@ -165,6 +210,13 @@ func (c *Client) formatAndDisplayMessage(msg *shared.Message) {
 }
 
 func (c *Client) formatAndDisplayPrivateMessage(msg *shared.Message) {
+	if msg == nil {
+		return
+	}
+
+	if msg.From == c.username {
+		return
+	}
 	formatted := fmt.Sprintf("(Private) (%s) %s: %s",
 		msg.Timestamp.Format("15:04:05"),
 		msg.From,
@@ -209,4 +261,38 @@ func (c *Client) handleRoomKey(msg *shared.Message) {
 	fmt.Print("Decrypted room key: ", c.roomKey, "\n")
 
 	// Here you would typically store the room key for later use
+}
+func (c *Client) DecryptPrivateMessage(msg *shared.Message) *shared.Message {
+	plainBytes, err := shared.Decrypt(msg.EncryptedKey, msg.Content, c.privateKey)
+	if err != nil {
+		fmt.Println("Failed to decrypt private message:", err)
+		return nil
+	}
+	msg.Content = plainBytes
+	return msg
+}
+func (c *Client) handlePublicKeyResponse(msg *shared.Message) {
+	plainPubPEM, err := shared.Decrypt(msg.EncryptedKey, msg.Content, c.privateKey)
+	if err != nil {
+		fmt.Println("Failed to decode received public key:", err)
+		return
+	}
+
+	pub, err := shared.ParsePublicKeyFromPEM([]byte(plainPubPEM))
+	if err != nil {
+		fmt.Println("Failed to parse public key:", err)
+		return
+	}
+
+	c.PublicKeyCache.Store(msg.From, pub)
+	fmt.Printf("Stored public key for %s\n", msg.From)
+
+	c.mu.Lock()
+	if pending, ok := c.PendingPrivateMsg[msg.From]; ok {
+		for _, content := range pending {
+			_ = c.SendPrivateMessage(msg.From, content)
+		}
+		delete(c.PendingPrivateMsg, msg.From)
+	}
+	c.mu.Unlock()
 }

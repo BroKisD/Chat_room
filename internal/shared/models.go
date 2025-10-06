@@ -10,16 +10,18 @@ import (
 type MessageType string
 
 const (
-	TypeAuth         MessageType = "auth"      // Authentication messages
-	TypeAuthResponse MessageType = "auth_resp" // Authentication response
-	TypePublic       MessageType = "public"    // Public messages
-	TypePrivate      MessageType = "private"   // Private messages
-	TypeUserList     MessageType = "user_list" // User list updates
-	TypeError        MessageType = "error"     // Error messages
-	TypeJoin         MessageType = "join"      // User join notification
-	TypeLeave        MessageType = "leave"     // User leave notification
-	TypePublicKey    MessageType = "public_key"
-	TypeRoomKey      MessageType = "room_key"
+	TypeAuth              MessageType = "auth"      // Authentication messages
+	TypeAuthResponse      MessageType = "auth_resp" // Authentication response
+	TypePublic            MessageType = "public"    // Public messages
+	TypePrivate           MessageType = "private"   // Private messages
+	TypeUserList          MessageType = "user_list" // User list updates
+	TypeError             MessageType = "error"     // Error messages
+	TypeJoin              MessageType = "join"      // User join notification
+	TypeLeave             MessageType = "leave"     // User leave notification
+	TypePublicKey         MessageType = "public_key"
+	TypeRoomKey           MessageType = "room_key"
+	TypePublicKeyRequest  MessageType = "public_key_request"
+	TypePublicKeyResponse MessageType = "public_key_response"
 )
 
 type Message struct {
@@ -36,11 +38,12 @@ type Message struct {
 }
 
 type User struct {
-	Username  string    `json:"username"`
-	JoinedAt  time.Time `json:"joinedAt"`
-	Conn      net.Conn  `json:"-"`
-	writeMu   sync.Mutex
-	PublicKey *rsa.PublicKey `json:"-"`
+	Username     string    `json:"username"`
+	JoinedAt     time.Time `json:"joinedAt"`
+	Conn         net.Conn  `json:"-"`
+	writeMu      sync.Mutex
+	PublicKey    *rsa.PublicKey `json:"-"`
+	PublicKeyPEM string         `json:"publicKeyPEM"`
 }
 
 func (u *User) WriteMessage(msg *Message) error {

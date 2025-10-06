@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -123,7 +124,19 @@ func (s *Server) handleMessage(user *shared.User, msg *shared.Message) error {
 	msg.From = user.Username
 	msg.Timestamp = time.Now()
 
+	if msg.Type == shared.TypePublicKeyRequest {
+		log.Printf("[DEBUG] Handling public key request from %s for %s",
+			user.Username, msg.To)
+		err := s.handlePublicKeyRequest(msg)
+		if err != nil {
+			log.Printf("[ERROR] Failed to handle public key request from %s: %v",
+				user.Username, err)
+		}
+		return err
+	}
+
 	if msg.Type == shared.TypePublicKey {
+
 		log.Printf("[DEBUG] Processing public key from %s", user.Username)
 		err := s.handlePublicKey(user, msg)
 		s.sendRoomKey(user.Username, user.Conn)
@@ -156,6 +169,12 @@ func (s *Server) handlePrivateMessage(user *shared.User, msg *shared.Message) er
 	targetUsername := msg.To
 	msg.Type = shared.TypePrivate
 	msg.To = targetUsername
+
+	// Check if the message is from the user themselves
+	if msg.From == msg.To {
+		log.Printf("[WARN] User %s attempted to send a private message to themselves", msg.From)
+		return fmt.Errorf("user %s attempted to message themselves", msg.From)
+	}
 
 	if targetUsername == msg.From {
 		s.sendErrorToConn(user.Conn, "Cannot send private message to yourself")
@@ -198,10 +217,18 @@ func (s *Server) handlePrivateMessage(user *shared.User, msg *shared.Message) er
 }
 
 func (s *Server) broadcastPublicMessage(msg *shared.Message) error {
-	log.Printf("[DEBUG] Broadcasting public message from %s: %s", msg.From, msg.Content)
-	msg.Type = shared.TypePublic
-	s.broadcast(msg)
-	log.Printf("[DEBUG] Public message queued for broadcast")
+	for _, user := range s.users.GetAll() {
+		log.Printf("[DEBUG] broadcast: sender=%q | current=%q", msg.From, user.Username)
+
+		if strings.TrimSpace(user.Username) == strings.TrimSpace(msg.From) {
+			log.Printf("[DEBUG] Skipping sender %s", user.Username)
+			continue
+		}
+
+		if err := user.WriteMessage(msg); err != nil {
+			log.Printf("[ERROR] Failed to send to %s: %v", user.Username, err)
+		}
+	}
 	return nil
 }
 
@@ -323,4 +350,43 @@ func (s *Server) sendRoomKey(username string, conn net.Conn) {
 	} else {
 		log.Printf("[INFO] Sent room key to %s", username)
 	}
+}
+func (s *Server) handlePublicKeyRequest(msg *shared.Message) error {
+	targetUser, exists := s.users.GetByUsername(msg.To)
+	if !exists {
+		return fmt.Errorf("user %s not found", msg.To)
+	}
+
+	if targetUser.PublicKey == nil {
+		return fmt.Errorf("user %s has no public key set", msg.To)
+	}
+
+	requester, exists := s.users.GetByUsername(msg.From)
+	if !exists {
+		return fmt.Errorf("requester %s not found", msg.From)
+	}
+
+	if requester.PublicKey == nil {
+		return fmt.Errorf("requester %s has no public key set", msg.From)
+	}
+
+	// Convert target's public key to PEM format string
+	pemPub, _ := shared.PublicKeyToPEM(targetUser.PublicKey)
+
+	// Encrypt the PEM public key using the REQUESTER's public key
+	encKeyB64, encDataB64, err := shared.Encrypt(string(pemPub), requester.PublicKey)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt public key for %s: %v", msg.From, err)
+	}
+
+	// Send encrypted key and data back to requester
+	resp := &shared.Message{
+		Type:         shared.TypePublicKeyResponse,
+		From:         msg.To,     // the user whose key was requested
+		To:           msg.From,   // the requester
+		EncryptedKey: encKeyB64,  // AES key encrypted with requester’s RSA pubkey
+		Content:      encDataB64, // target's PEM public key encrypted with AES
+	}
+
+	return requester.WriteMessage(resp)
 }
