@@ -88,7 +88,7 @@ func (c *Client) Login(username string) error {
 }
 
 func (c *Client) SendMessage(content string) error {
-	c.displayMessage(fmt.Sprintf("(You) (%s): %s",
+	c.displayMessage(fmt.Sprintf("(Global) (You) (%s): %s",
 		time.Now().Format("15:04:05"), content))
 
 	_, encDataB64, err := shared.EncryptWithRoomKey(content, c.roomKey)
@@ -140,8 +140,8 @@ func (c *Client) SendPrivateMessage(target, content string) error {
 		Content:      encDataB64,
 		Timestamp:    time.Now(),
 	}
-	c.displayMessage(fmt.Sprintf("(You) (%s): %s",
-		time.Now().Format("15:04:05"), content))
+	c.displayMessage(fmt.Sprintf("(Private to %s) (You) (%s): %s",
+		target, time.Now().Format("15:04:05"), content))
 
 	return c.conn.Send(msg)
 }
@@ -194,7 +194,7 @@ func (c *Client) formatAndDisplayMessage(msg *shared.Message) {
 	if msg == nil {
 		return
 	}
-	if msg.From == c.username {
+	if strings.TrimSpace(msg.From) == strings.TrimSpace(c.username) {
 		return
 	}
 	msgContent, err := shared.DecryptWithRoomKey(msg.EncryptedData, c.roomKey)
@@ -214,7 +214,7 @@ func (c *Client) formatAndDisplayPrivateMessage(msg *shared.Message) {
 		return
 	}
 
-	if msg.From == c.username {
+	if strings.TrimSpace(msg.From) == strings.TrimSpace(c.username) {
 		return
 	}
 	formatted := fmt.Sprintf("(Private) (%s) %s: %s",

@@ -170,13 +170,7 @@ func (s *Server) handlePrivateMessage(user *shared.User, msg *shared.Message) er
 	msg.Type = shared.TypePrivate
 	msg.To = targetUsername
 
-	// Check if the message is from the user themselves
-	if msg.From == msg.To {
-		log.Printf("[WARN] User %s attempted to send a private message to themselves", msg.From)
-		return fmt.Errorf("user %s attempted to message themselves", msg.From)
-	}
-
-	if targetUsername == msg.From {
+	if strings.TrimSpace(targetUsername) == strings.TrimSpace(msg.From) {
 		s.sendErrorToConn(user.Conn, "Cannot send private message to yourself")
 		return fmt.Errorf("user %s attempted to message themselves", msg.From)
 	}
@@ -353,7 +347,9 @@ func (s *Server) sendRoomKey(username string, conn net.Conn) {
 }
 func (s *Server) handlePublicKeyRequest(msg *shared.Message) error {
 	targetUser, exists := s.users.GetByUsername(msg.To)
+	sender, _ := s.users.GetByUsername(msg.From)
 	if !exists {
+		s.sendErrorToConn(sender.Conn, "User "+msg.To+" not found")
 		return fmt.Errorf("user %s not found", msg.To)
 	}
 
