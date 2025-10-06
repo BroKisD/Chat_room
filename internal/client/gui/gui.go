@@ -128,11 +128,13 @@ func (a *App) setupUI() {
 	a.input = widget.NewMultiLineEntry()
 	a.input.SetPlaceHolder("Type your message...")
 
-	sendBtn := widget.NewButtonWithIcon("Send", theme.MailSendIcon(), func() {
+	sendBtn := widget.NewButtonWithIcon("Send", theme.MailSendIcon(), nil)
+	sendBtn.Importance = widget.HighImportance
+	sendBtn.OnTapped = func() {
 		content := a.input.Text
 		content = ConvertEmojis(content)
-		a.sendMessageWithContent(content)
-	})
+		a.sendMessage(content)
+	}
 
 	emojiBtn := widget.NewButton("☺", a.showEmojiPicker)
 
@@ -247,12 +249,26 @@ func (a *App) processMessage(msg string) {
 	a.messagesScroll.ScrollToBottom()
 }
 
-func (a *App) sendMessageWithContent(content string) {
-	if content == "" {
+func (a *App) sendMessage(content string) {
+	var err error
+	raw := content
+	if strings.HasPrefix(raw, "/w ") {
+		text := strings.TrimSpace(raw)
+		parts := strings.SplitN(text, " ", 3)
+		if len(parts) < 3 {
+			dialog.ShowError(fmt.Errorf("invalid whisper format. use: /w username message"), a.mainWindow)
+			return
+		}
+		err = a.client.SendPrivateMessage(parts[1], parts[2])
+	} else {
+		text := strings.TrimSpace(raw)
+		err = a.client.SendMessage(text)
+	}
+
+	if err != nil {
+		dialog.ShowError(err, a.mainWindow)
 		return
 	}
-	if err := a.client.SendMessage(content); err != nil {
-		log.Println("Send error:", err)
-	}
+
 	a.input.SetText("")
 }

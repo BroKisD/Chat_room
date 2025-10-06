@@ -17,14 +17,8 @@ func ReadMessage(r io.Reader) (*Message, error) {
 
 	line = strings.TrimSpace(line)
 
-	// Decrypt first
-	decrypted, err := Decrypt(line)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt failed: %v", err)
-	}
-
 	var msg Message
-	if err := json.Unmarshal([]byte(decrypted), &msg); err != nil {
+	if err := json.Unmarshal([]byte(line), &msg); err != nil {
 		return nil, fmt.Errorf("json parse failed: %v", err)
 	}
 
@@ -37,14 +31,7 @@ func WriteMessage(w io.Writer, msg *Message) error {
 		return err
 	}
 
-	// Encrypt JSON before sending
-	encrypted, err := Encrypt(string(data))
-	if err != nil {
-		return err
-	}
-
-	// Write encrypted message with newline
-	data = append([]byte(encrypted), '\n')
+	data = append([]byte(string(data)), '\n')
 	_, err = w.Write(data)
 	return err
 }
