@@ -223,10 +223,8 @@ func (a *App) dispatchMessages() {
 			Content: msg,
 		})
 
-		fyne.DoAndWait(func() {
-			a.processMessage(msg)
-			log.Println("Processed message in UI thread")
-		})
+		a.processMessage(msg)
+		log.Println("Processed message in UI thread")
 	}
 }
 
