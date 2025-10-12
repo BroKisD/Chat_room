@@ -263,6 +263,9 @@ func (c *Client) handleRoomKey(msg *shared.Message) {
 	// Here you would typically store the room key for later use
 }
 func (c *Client) DecryptPrivateMessage(msg *shared.Message) *shared.Message {
+	if strings.TrimSpace(msg.From) == strings.TrimSpace(c.username) {
+		return nil
+	}
 	plainBytes, err := shared.Decrypt(msg.EncryptedKey, msg.Content, c.privateKey)
 	if err != nil {
 		fmt.Println("Failed to decrypt private message:", err)

@@ -16,7 +16,7 @@ type Connection struct {
 
 func NewConnection() *Connection {
 	return &Connection{
-		incoming: make(chan *shared.Message, 100), // buffer để tránh nghẽn
+		incoming: make(chan *shared.Message, 100),
 	}
 }
 
@@ -27,7 +27,6 @@ func (c *Connection) Connect(address string) error {
 	}
 	c.conn = conn
 
-	// bắt đầu goroutine đọc message
 	go c.listen()
 
 	return nil
