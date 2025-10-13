@@ -39,7 +39,7 @@ func NewApp(client *client.Client) *App {
 	}
 
 	client.SetMessageHandler(func(msg string) {
-		fmt.Println("[DEBUG] Raw from server:", msg)
+		fmt.Println("[DEBUG] Raw to server:", msg)
 		a.incoming <- msg
 	})
 
@@ -184,7 +184,14 @@ func (a *App) showLoginDialog() {
 		}
 
 		if err := a.client.Connect(":9000"); err != nil {
-			dialog.ShowError(err, a.mainWindow)
+			dialog.ShowConfirm("Connection failed",
+				"Cannot connect to server.\nDo you want to close the app?",
+				func(confirm bool) {
+					if confirm {
+						a.mainWindow.Close()
+					}
+				},
+				a.mainWindow)
 			return
 		}
 
