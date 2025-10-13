@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"chatroom/internal/shared"
 )
@@ -42,7 +43,10 @@ func (c *Connection) listen() {
 				close(c.incoming)
 				return
 			}
-			fmt.Println("[WARN] Read error:", err)
+			for i := 0; i < 3; i++ {
+				fmt.Println("[WARN] Read error:", err)
+				time.Sleep(1 * time.Second)
+			}
 			continue
 		}
 
