@@ -304,16 +304,6 @@ func (c *Client) handlePublicKeyResponse(msg *shared.Message) {
 	c.mu.Unlock()
 }
 
-func (c *Client) watchConnection() {
-	for {
-		_, ok := <-c.conn.Incoming()
-		if !ok {
-			c.displayMessage("Disconnected from server.")
-			return
-		}
-	}
-}
-
 func (c *Client) onServerShutdown() {
 	c.activeUsers = nil
 	c.roomKey = nil
