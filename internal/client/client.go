@@ -186,8 +186,12 @@ func (c *Client) handleMessages() {
 			c.displayErrorMessage(msg)
 		case shared.TypePublicKeyResponse:
 			c.handlePublicKeyResponse(msg)
+		default:
+			fmt.Println("Unknown message type:", msg.Type)
 		}
 	}
+	c.displayMessage("Disconnected from server.")
+	c.onServerShutdown()
 }
 
 func (c *Client) formatAndDisplayMessage(msg *shared.Message) {
@@ -298,4 +302,19 @@ func (c *Client) handlePublicKeyResponse(msg *shared.Message) {
 		delete(c.PendingPrivateMsg, msg.From)
 	}
 	c.mu.Unlock()
+}
+
+func (c *Client) watchConnection() {
+	for {
+		_, ok := <-c.conn.Incoming()
+		if !ok {
+			c.displayMessage("Disconnected from server.")
+			return
+		}
+	}
+}
+
+func (c *Client) onServerShutdown() {
+	c.activeUsers = nil
+	c.roomKey = nil
 }
