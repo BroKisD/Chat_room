@@ -22,6 +22,7 @@ type Client struct {
 	PublicKeyCache    *PublicKeyCache
 	PendingPrivateMsg map[string][]string
 	mu                sync.Mutex
+	autoReconnect     bool
 }
 
 func New() *Client {
@@ -77,6 +78,7 @@ func (c *Client) Connect(address string) error {
 
 	// Start message listener
 	fmt.Print("Public key of client: \n", string(pemPub), "\n")
+	c.autoReconnect = true
 	go c.handleMessages()
 
 	return nil
@@ -159,6 +161,7 @@ func (c *Client) Disconnect() error {
 	if err := c.conn.Send(msg); err != nil {
 		return err
 	}
+	c.autoReconnect = false
 	return c.conn.Close()
 }
 
@@ -194,20 +197,22 @@ func (c *Client) handleMessages() {
 			fmt.Println("Unknown message type:", msg.Type)
 		}
 	}
-	c.displayMessage("Disconnected from server. Attempting reconnect...")
-	go func() {
-		for {
-			if err := c.ReconnectAndHandshake("127.0.0.1:9000"); err != nil {
-				fmt.Println("Reconnect failed:", err)
-				time.Sleep(5 * time.Second)
-				continue
-			} else {
-				fmt.Println("Reconnect+handshake success")
-				c.displayMessage("Reconnected to server.")
-				return
+	if c.autoReconnect {
+		c.displayMessage("Disconnected from server. Attempting reconnect...")
+		go func() {
+			for {
+				if err := c.ReconnectAndHandshake("127.0.0.1:9000"); err != nil {
+					fmt.Println("Reconnect failed:", err)
+					time.Sleep(5 * time.Second)
+					continue
+				} else {
+					fmt.Println("Reconnect+handshake success")
+					c.displayMessage("Reconnected to server.")
+					return
+				}
 			}
-		}
-	}()
+		}()
+	}
 }
 
 func (c *Client) formatAndDisplayMessage(msg *shared.Message) {
