@@ -203,6 +203,7 @@ func (c *Client) handleMessages() {
 				continue
 			} else {
 				fmt.Println("Reconnect+handshake success")
+				c.displayMessage("Reconnected to server.")
 				return
 			}
 		}
