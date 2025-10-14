@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"log"
 	"strings"
+	"time"
 
 	"chatroom/internal/client"
 
@@ -40,7 +41,7 @@ func NewApp(client *client.Client) *App {
 	}
 
 	client.SetMessageHandler(func(msg string) {
-		fmt.Println("[DEBUG] Raw from server:", msg)
+		fmt.Println("[DEBUG] Raw to server:", msg)
 		a.incoming <- msg
 	})
 
@@ -184,19 +185,35 @@ func (a *App) showLoginDialog() {
 	)
 
 	dialog.ShowCustomConfirm("Login", "Connect", "Cancel", content, func(connect bool) {
-		if !connect || username.Text == "" {
+		if !connect {
 			a.mainWindow.Close()
+			return
+		}
+
+		if username.Text == "" {
+			dialog.ShowInformation("Invalid Input", "Please enter a username.", a.mainWindow)
+			a.reopenLogin()
 			return
 		}
 
 		// Try to login and connect
 		if err := a.client.Login(username.Text); err != nil {
 			dialog.ShowError(err, a.mainWindow)
+			a.reopenLogin()
 			return
 		}
 
 		if err := a.client.Connect(":9000"); err != nil {
-			dialog.ShowError(err, a.mainWindow)
+			dialog.ShowConfirm("Connection failed",
+				"Cannot connect to server.\nDo you want to retry?",
+				func(confirm bool) {
+					if confirm {
+						a.reopenLogin()
+					} else {
+						a.mainWindow.Close()
+					}
+				},
+				a.mainWindow)
 			return
 		}
 
@@ -262,6 +279,10 @@ func (a *App) processMessage(msg string) {
 func (a *App) sendMessage(content string) {
 	var err error
 	raw := content
+	if strings.TrimSpace(raw) == "" {
+		return
+	}
+
 	if strings.HasPrefix(raw, "/w ") {
 		text := strings.TrimSpace(raw)
 		parts := strings.SplitN(text, " ", 3)
@@ -281,4 +302,11 @@ func (a *App) sendMessage(content string) {
 	}
 
 	a.input.SetText("")
+}
+
+func (a *App) reopenLogin() {
+	go func() {
+		time.Sleep(2000 * time.Millisecond)
+		a.showLoginDialog()
+	}()
 }

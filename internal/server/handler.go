@@ -115,6 +115,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			return
 		}
 	}
+
 }
 
 func (s *Server) handleMessage(user *shared.User, msg *shared.Message) error {
@@ -123,6 +124,16 @@ func (s *Server) handleMessage(user *shared.User, msg *shared.Message) error {
 
 	msg.From = user.Username
 	msg.Timestamp = time.Now()
+
+	if msg.Type == shared.TypeReconnect {
+		log.Printf("[DEBUG] Handling reconnect from %s", user.Username)
+		err := s.handleReconnect(user)
+		if err != nil {
+			log.Printf("[ERROR] Failed to handle reconnect from %s: %v",
+				user.Username, err)
+		}
+		return err
+	}
 
 	if msg.Type == shared.TypePublicKeyRequest {
 		log.Printf("[DEBUG] Handling public key request from %s for %s",
@@ -385,4 +396,21 @@ func (s *Server) handlePublicKeyRequest(msg *shared.Message) error {
 	}
 
 	return requester.WriteMessage(resp)
+}
+
+func (s *Server) handleReconnect(user *shared.User) error {
+	log.Printf("[DEBUG] Handling reconnect for user %s", user.Username)
+	s.sendRoomKey(user.Username, user.Conn)
+
+	userListMsg := &shared.Message{
+		Type:      shared.TypeUserList,
+		Users:     s.users.GetUsernames(),
+		Timestamp: time.Now(),
+	}
+	if err := user.WriteMessage(userListMsg); err != nil {
+		log.Printf("[ERROR] Failed to resend user list to %s: %v", user.Username, err)
+		return err
+	}
+	log.Printf("[INFO] Resent user list to %s", user.Username)
+	return nil
 }

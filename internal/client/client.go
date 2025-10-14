@@ -90,8 +90,12 @@ func (c *Client) Login(username string) error {
 func (c *Client) SendMessage(content string) error {
 	c.displayMessage(fmt.Sprintf("(Global) (You) (%s): %s",
 		time.Now().Format("15:04:05"), content))
+	fmt.Print("Room key: ", c.roomKey)
 
 	_, encDataB64, err := shared.EncryptWithRoomKey(content, c.roomKey)
+	if encDataB64 == "" {
+		return fmt.Errorf("encryption failed: empty ciphertext")
+	}
 	if err != nil {
 		return err
 	}
@@ -186,8 +190,24 @@ func (c *Client) handleMessages() {
 			c.displayErrorMessage(msg)
 		case shared.TypePublicKeyResponse:
 			c.handlePublicKeyResponse(msg)
+		default:
+			fmt.Println("Unknown message type:", msg.Type)
 		}
 	}
+	c.displayMessage("Disconnected from server. Attempting reconnect...")
+	go func() {
+		for {
+			if err := c.ReconnectAndHandshake("127.0.0.1:9000"); err != nil {
+				fmt.Println("Reconnect failed:", err)
+				time.Sleep(5 * time.Second)
+				continue
+			} else {
+				fmt.Println("Reconnect+handshake success")
+				c.displayMessage("Reconnected to server.")
+				return
+			}
+		}
+	}()
 }
 
 func (c *Client) formatAndDisplayMessage(msg *shared.Message) {
@@ -298,4 +318,47 @@ func (c *Client) handlePublicKeyResponse(msg *shared.Message) {
 		delete(c.PendingPrivateMsg, msg.From)
 	}
 	c.mu.Unlock()
+}
+
+func (c *Client) ReconnectAndHandshake(address string) error {
+	if c.conn != nil {
+		_ = c.conn.Close()
+	}
+
+	c.conn = networking.NewConnection()
+
+	if err := c.conn.Connect(address); err != nil {
+		return err
+	}
+
+	authMsg := &shared.Message{
+		Type:    shared.TypeAuth,
+		From:    c.username,
+		Content: "auth",
+	}
+	if err := c.conn.Send(authMsg); err != nil {
+		return fmt.Errorf("auth send failed: %w", err)
+	}
+
+	authResp, ok := <-c.conn.Incoming()
+	if !ok {
+		return fmt.Errorf("connection closed while waiting auth response")
+	}
+	if authResp.Type != shared.TypeAuthResponse || !authResp.Success {
+		return fmt.Errorf("authentication failed: %s", authResp.Error)
+	}
+
+	pemPub, _ := shared.PublicKeyToPEM(c.publicKey)
+	pubMsg := &shared.Message{
+		Type:    shared.TypePublicKey,
+		From:    c.username,
+		Content: string(pemPub),
+	}
+	_ = c.conn.Send(pubMsg)
+
+	go c.handleMessages()
+
+	_ = c.conn.Send(&shared.Message{Type: shared.TypeReconnect, From: c.username})
+
+	return nil
 }
