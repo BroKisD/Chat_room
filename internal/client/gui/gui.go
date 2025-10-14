@@ -265,21 +265,38 @@ func (a *App) dispatchMessages() {
 func (a *App) processMessage(msg string) {
 	if strings.HasPrefix(msg, "Active users: ") {
 		users := strings.TrimPrefix(msg, "Active users: ")
-		a.users = strings.Split(users, ", ")
+		rawUsers := strings.Split(users, ",")
+
+		a.users = make([]string, len(rawUsers))
+		for i, u := range rawUsers {
+			u = strings.TrimSpace(u)
+			if u == a.client.GetUsername() {
+				a.users[i] = u + " (me)"
+			} else {
+				a.users[i] = u
+			}
+		}
 		a.userList.Refresh()
 		return
+	}
+
+	displayMsg := msg
+	prefix := a.client.GetUsername() + ":"
+	if strings.HasPrefix(msg, prefix) {
+		displayMsg = strings.Replace(msg, prefix, prefix+" (me):", 1)
 	}
 
 	segment := &widget.TextSegment{
 		Style: widget.RichTextStyle{
 			ColorName: theme.ColorNameForeground,
 		},
-		Text: msg + "\n",
+		Text: displayMsg + "\n",
 	}
 	a.messages.Segments = append(a.messages.Segments, segment)
 	a.messages.Refresh()
 	a.messagesScroll.ScrollToBottom()
 }
+
 
 func (a *App) sendMessage(content string) {
 	var err error

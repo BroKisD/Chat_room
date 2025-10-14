@@ -36,6 +36,10 @@ func (c *Client) SetMessageHandler(handler func(msg string)) {
 	c.onMessage = handler
 }
 
+func (c *Client) GetUsername() string {
+    return c.username
+}
+
 func (c *Client) Connect(address string) error {
 	if err := c.conn.Connect(address); err != nil {
 		return err
