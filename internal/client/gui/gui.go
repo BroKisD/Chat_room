@@ -114,7 +114,7 @@ func (a *App) setupUI() {
 	// Message display area with rich text
 	a.messages = widget.NewRichText()
 	a.messagesScroll = container.NewScroll(a.messages)
-	messagesContainer := createBorderedContainer(a.messagesScroll, "FUV Chatroom")
+	messagesContainer := createBorderedContainer(a.messagesScroll, "Talkie Chat Room")
 
 	// User list with status indicators
 	a.userList = widget.NewList(
@@ -222,24 +222,29 @@ func (a *App) showLoginDialog() {
 }
 
 func (a *App) showEmojiPicker() {
-	emojis := GetEmojiList()
-	emojiButtons := make([]fyne.CanvasObject, 0, len(emojis))
+	tabs := container.NewAppTabs()
 
-	for _, emoji := range emojis {
-		e := emoji
-		emojiButtons = append(emojiButtons, widget.NewButton(e, func() {
-			a.input.SetText(a.input.Text + e)
-		}))
+	for category, group := range emojiMap {
+		buttons := []fyne.CanvasObject{}
+		for _, emoji := range group {
+			e := emoji
+			buttons = append(buttons, widget.NewButton(e, func() {
+				a.input.SetText(a.input.Text + e)
+			}))
+		}
+		grid := container.NewGridWithColumns(6, buttons...)
+		tabs.Append(container.NewTabItem(category, grid))
 	}
 
-	emojiGrid := container.NewGridWithColumns(5, emojiButtons...)
-	dialog.ShowCustom("Emojis", "Close", emojiGrid, a.mainWindow)
+	dialog.ShowCustom("Emojis", "Close", tabs, a.mainWindow)
 }
 
 func GetEmojiList() []string {
-	emojis := make([]string, 0, len(emojiMap))
-	for _, v := range emojiMap {
-		emojis = append(emojis, v)
+	emojis := []string{}
+	for _, group := range emojiMap {
+		for _, emoji := range group {
+			emojis = append(emojis, emoji)
+		}
 	}
 	return emojis
 }
