@@ -267,6 +267,10 @@ func (a *App) processMessage(msg string) {
 func (a *App) sendMessage(content string) {
 	var err error
 	raw := content
+	if strings.TrimSpace(raw) == "" {
+		return
+	}
+
 	if strings.HasPrefix(raw, "/w ") {
 		text := strings.TrimSpace(raw)
 		parts := strings.SplitN(text, " ", 3)
