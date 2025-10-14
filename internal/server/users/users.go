@@ -117,3 +117,22 @@ func (m *Manager) GetAllPublicKeys() map[string]*rsa.PublicKey {
 	}
 	return pubKeys
 }
+
+func (m *Manager) Add(u *shared.User) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if u == nil || u.Username == "" {
+		return
+	}
+	if existing, ok := m.users[u.Username]; ok {
+		existing.PublicKeyPEM = u.PublicKeyPEM
+		return
+	}
+	m.users[u.Username] = u
+}
+
+func (m *Manager) Clear() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.users = make(map[string]*shared.User)
+}

@@ -290,7 +290,7 @@ func (a *App) sendMessage(content string) {
 
 func (a *App) reopenLogin() {
 	go func() {
-		time.Sleep(1000 * time.Millisecond)
+		time.Sleep(2000 * time.Millisecond)
 		a.showLoginDialog()
 	}()
 }

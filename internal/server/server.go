@@ -2,8 +2,12 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"log"
 	"net"
+	"os"
+	"strings"
 	"sync"
 
 	"chatroom/internal/server/auth"
@@ -21,17 +25,28 @@ type Server struct {
 	done        chan struct{}
 	connections sync.WaitGroup
 	roomKey     []byte
+	stateFile   string
 }
 
 func New(addr string) *Server {
-	return &Server{
+	s := &Server{
 		addr:        addr,
 		auth:        auth.New(),
 		users:       users.New(),
-		broadcastCh: make(chan *shared.Message, 100), // Buffer for 100 messages
+		broadcastCh: make(chan *shared.Message, 100),
 		done:        make(chan struct{}),
-		roomKey:     shared.GenerateRoomKey(),
+		stateFile:   "server_state.json",
 	}
+	s.loadOrGenerateRoomKey()
+
+	// Try loading saved state
+	if err := s.LoadState(); err == nil {
+		log.Println("[INFO] Server state loaded from file.")
+	} else {
+		log.Println("[WARN] No previous state found, generating new room key.")
+	}
+
+	return s
 }
 
 func (s *Server) Start() error {
@@ -47,17 +62,21 @@ func (s *Server) Start() error {
 	return s.serve()
 }
 
-// Gracefully shutdown the server
 func (s *Server) Shutdown(ctx context.Context) error {
-	// Signal shutdown
-	close(s.done)
 
-	// Close listener to stop accepting new connections
+	log.Println("[INFO] Saving server state before shutdown...")
+
+	if err := s.SaveState(); err != nil {
+		log.Printf("[ERROR] Failed to save server state: %v", err)
+	}
+
+	close(s.done)
+	s.users.Clear()
+
 	if err := s.listener.Close(); err != nil {
 		return err
 	}
 
-	// Wait for all connections to finish with context timeout
 	done := make(chan struct{})
 	go func() {
 		s.connections.Wait()
@@ -126,4 +145,74 @@ func (s *Server) handleBroadcasts() {
 			}
 		}
 	}
+}
+
+func (s *Server) SaveState() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	state := map[string]interface{}{
+		"roomKey": base64.StdEncoding.EncodeToString(s.roomKey),
+	}
+
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(s.stateFile, data, 0644)
+}
+
+func (s *Server) LoadState() error {
+	data, err := os.ReadFile(s.stateFile)
+	if err != nil {
+		return err
+	}
+
+	var state map[string]interface{}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return err
+	}
+
+	if rk, ok := state["roomKey"].(string); ok && rk != "" {
+		decoded, err := base64.StdEncoding.DecodeString(rk)
+		if err != nil {
+			log.Printf("[ERROR] Failed to decode room key: %v", err)
+			s.roomKey = shared.GenerateRoomKey()
+		} else if len(decoded) == 0 {
+			log.Printf("[WARN] Loaded empty room key, regenerating new one")
+			s.roomKey = shared.GenerateRoomKey()
+		} else {
+			s.roomKey = decoded
+		}
+	} else {
+		log.Printf("[WARN] No valid room key found in state, generating new one")
+		s.roomKey = shared.GenerateRoomKey()
+	}
+	return nil
+}
+
+func (s *Server) loadOrGenerateRoomKey() {
+	data, err := os.ReadFile("room.key")
+	if err == nil {
+		str := strings.TrimSpace(string(data))
+		decoded, err := base64.StdEncoding.DecodeString(str)
+		if err == nil && len(decoded) == 32 {
+			s.roomKey = decoded
+			log.Printf("[INFO] Loaded existing room key (len=%d)", len(s.roomKey))
+			return
+		}
+		log.Printf("[WARN] Invalid room key format, regenerating new key: %v", err)
+	}
+
+	// Generate new key
+	s.roomKey = shared.GenerateRoomKey()
+	if s.roomKey == nil {
+		log.Fatal("[FATAL] Failed to generate room key")
+	}
+	encoded := base64.StdEncoding.EncodeToString(s.roomKey)
+	if err := os.WriteFile("room.key", []byte(encoded), 0600); err != nil {
+		log.Printf("[ERROR] Failed to save room key: %v", err)
+	}
+	log.Printf("[INFO] Generated new room key (len=%d)", len(s.roomKey))
 }

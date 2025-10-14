@@ -22,6 +22,7 @@ const (
 	TypeRoomKey           MessageType = "room_key"
 	TypePublicKeyRequest  MessageType = "public_key_request"
 	TypePublicKeyResponse MessageType = "public_key_response"
+	TypeReconnect         MessageType = "reconnect"
 )
 
 type Message struct {
