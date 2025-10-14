@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"os"
 	"fmt"
 	"image/color"
 	"log"
@@ -76,8 +77,19 @@ func createBorderedContainer(content fyne.CanvasObject, title string) *fyne.Cont
 func (a *App) Run() error {
 	fyneApp := app.NewWithID("com.chatroom.app")
 	fyneApp.Settings().SetTheme(theme.LightTheme())
-	a.mainWindow = fyneApp.NewWindow("FUV Chatroom")
+	a.mainWindow = fyneApp.NewWindow("Talkie")
 	a.mainWindow.Resize(fyne.NewSize(500, 600))
+
+	a.mainWindow.CenterOnScreen()
+	
+	iconPath := "assets/app_icon.png"
+	iconData, err := os.ReadFile(iconPath)
+	if err != nil {
+		fyne.LogError("Failed to load icon:", err)
+	} else {
+		iconResource := fyne.NewStaticResource("app_icon.png", iconData)
+		a.mainWindow.SetIcon(iconResource)
+	}
 
 	// Setup main UI components
 	a.setupUI()
