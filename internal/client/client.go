@@ -6,6 +6,9 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -38,7 +41,7 @@ func (c *Client) SetMessageHandler(handler func(msg string)) {
 }
 
 func (c *Client) GetUsername() string {
-    return c.username
+	return c.username
 }
 
 func (c *Client) Connect(address string) error {
@@ -197,6 +200,14 @@ func (c *Client) handleMessages() {
 			c.displayErrorMessage(msg)
 		case shared.TypePublicKeyResponse:
 			c.handlePublicKeyResponse(msg)
+		case shared.TypeFileDownload:
+			c.saveReceivedFile(msg)
+		case shared.TypeInfo:
+			c.displaySystemMessage(msg)
+		case shared.TypeFileAvailable:
+			c.displaySystemMessage(msg)
+		case shared.TypeFileTransfer:
+			c.SendFile(msg.Filename)
 		default:
 			fmt.Println("Unknown message type:", msg.Type)
 		}
@@ -370,4 +381,60 @@ func (c *Client) ReconnectAndHandshake(address string) error {
 	_ = c.conn.Send(&shared.Message{Type: shared.TypeReconnect, From: c.username})
 
 	return nil
+}
+
+func (c *Client) SendFile(filePath string) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %v", err)
+	}
+	defer file.Close()
+
+	filename := filepath.Base(filePath)
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %v", err)
+	}
+
+	_, encoded, _ := shared.EncryptWithRoomKey(string(fileBytes), c.roomKey)
+
+	msg := &shared.Message{
+		Type:      shared.TypeFileTransfer,
+		From:      c.username,
+		Filename:  filename,
+		Content:   encoded,
+		Timestamp: time.Now(),
+	}
+	return c.conn.Send(msg)
+}
+
+func (c *Client) RequestFile(filename string) error {
+	msg := &shared.Message{
+		Type:     shared.TypeFileDownload,
+		From:     c.username,
+		Filename: filename,
+	}
+	return c.conn.Send(msg)
+}
+
+func (c *Client) saveReceivedFile(msg *shared.Message) {
+	data, err := shared.DecryptWithRoomKey(msg.Content, c.roomKey)
+	if err != nil {
+		fmt.Println("Failed to decode file:", err)
+		return
+	}
+
+	downloadDir := "downloads"
+	if err := os.MkdirAll(downloadDir, 0755); err != nil {
+		fmt.Println("Failed to create Downloads directory:", err)
+		return
+	}
+
+	savePath := filepath.Join(downloadDir, msg.Filename)
+	if err := os.WriteFile(savePath, data, 0644); err != nil {
+		fmt.Println("Failed to save file:", err)
+		return
+	}
+
+	fmt.Printf("[File] Saved file to %s\n", savePath)
 }

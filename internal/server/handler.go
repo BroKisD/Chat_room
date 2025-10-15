@@ -2,15 +2,18 @@ package server
 
 import (
 	"bufio"
+	"bytes"
+	"chatroom/internal/shared"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-
-	"chatroom/internal/shared"
 )
 
 func (s *Server) handleConnection(conn net.Conn) {
@@ -124,6 +127,26 @@ func (s *Server) handleMessage(user *shared.User, msg *shared.Message) error {
 
 	msg.From = user.Username
 	msg.Timestamp = time.Now()
+
+	if msg.Type == shared.TypeFileDownload {
+		log.Printf("[DEBUG] Handling file download request from %s for file %s",
+			user.Username, msg.Filename)
+		err := s.HandleFileRequest(user, msg)
+		if err != nil {
+			log.Printf("[ERROR] Failed to handle file request from %s: %v",
+				user.Username, err)
+		}
+		return err
+	}
+
+	if msg.Type == shared.TypeFileTransfer {
+		log.Printf("[DEBUG] Handling file transfer from %s", user.Username)
+		err := s.HandleFileTransfer(user, msg)
+		if err != nil {
+			log.Printf("[ERROR] Failed to handle file transfer from %s: %v", user.Username, err)
+		}
+		return err
+	}
 
 	if msg.Type == shared.TypeReconnect {
 		log.Printf("[DEBUG] Handling reconnect from %s", user.Username)
@@ -412,5 +435,83 @@ func (s *Server) handleReconnect(user *shared.User) error {
 		return err
 	}
 	log.Printf("[INFO] Resent user list to %s", user.Username)
+	return nil
+}
+
+func (s *Server) HandleFileTransfer(user *shared.User, msg *shared.Message) error {
+	if msg.Filename == "" || msg.Content == "" {
+		log.Printf("[WARN] Invalid file transfer message from %s", user.Username)
+		s.sendError(user.Username, "Invalid file transfer message (missing filename or content)")
+		return fmt.Errorf("invalid file message from %s", user.Username)
+	}
+
+	filename := filepath.Base(msg.Filename)
+
+	reader := bytes.NewReader([]byte(msg.Content))
+	if err := s.fileTransfer.Upload(filename, reader); err != nil {
+		log.Printf("[ERROR] Failed to save file %s: %v", filename, err)
+		s.sendError(user.Username, fmt.Sprintf("Failed to save file %s", filename))
+		return err
+	}
+
+	log.Printf("[INFO] File received: %s from %s", filename, user.Username)
+
+	ack := &shared.Message{
+		Type:      shared.TypeInfo,
+		Content:   fmt.Sprintf("File '%s' uploaded successfully.", filename),
+		Timestamp: time.Now(),
+	}
+	user.WriteMessage(ack)
+
+	notify := &shared.Message{
+		Type:      shared.TypeFileAvailable,
+		From:      user.Username,
+		Filename:  filename,
+		Content:   fmt.Sprintf("[FILE] %s:%s", user.Username, filename),
+		Timestamp: time.Now(),
+	}
+	s.broadcast(notify)
+
+	return nil
+}
+
+func (s *Server) HandleFileRequest(user *shared.User, msg *shared.Message) error {
+	if msg.Filename == "" {
+		s.sendError(user.Username, "Missing filename in file request")
+		return fmt.Errorf("missing filename in request from %s", user.Username)
+	}
+
+	filename := filepath.Base(msg.Filename)
+	path := filepath.Join(s.fileTransfer.UploadDir(), filename)
+
+	file, err := os.Open(path)
+	if err != nil {
+		log.Printf("[ERROR] Failed to open requested file %s: %v", filename, err)
+		s.sendError(user.Username, fmt.Sprintf("File '%s' not found", filename))
+		return err
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		log.Printf("[ERROR] Failed to read file %s: %v", filename, err)
+		s.sendError(user.Username, fmt.Sprintf("Failed to read file '%s'", filename))
+		return err
+	}
+
+	resp := &shared.Message{
+		Type:      shared.TypeFileDownload,
+		From:      "server",
+		Filename:  filename,
+		Content:   string(data),
+		Timestamp: time.Now(),
+	}
+
+	if err := user.WriteMessage(resp); err != nil {
+		log.Printf("[ERROR] Failed to send file %s to %s: %v", filename, user.Username, err)
+		return err
+	}
+
+	log.Printf("[INFO] Sent file '%s' to %s successfully", filename, user.Username)
 	return nil
 }

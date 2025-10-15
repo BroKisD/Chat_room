@@ -32,3 +32,7 @@ func (ft *FileTransfer) Download(filename string) (io.ReadCloser, error) {
 	path := filepath.Join(ft.uploadDir, filename)
 	return os.Open(path)
 }
+
+func (ft *FileTransfer) UploadDir() string {
+	return ft.uploadDir
+}

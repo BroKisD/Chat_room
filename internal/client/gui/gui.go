@@ -1,10 +1,11 @@
 package gui
 
 import (
-	"os"
 	"fmt"
 	"image/color"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ type App struct {
 	connected      bool
 	msgHistory     []string
 	incoming       chan string
+	messageList    *fyne.Container
 }
 
 func NewApp(client *client.Client) *App {
@@ -82,7 +84,7 @@ func (a *App) Run() error {
 	a.mainWindow.Resize(fyne.NewSize(500, 600))
 
 	a.mainWindow.CenterOnScreen()
-	
+
 	iconPath := "assets/app_icon.png"
 	iconData, err := os.ReadFile(iconPath)
 	if err != nil {
@@ -111,9 +113,9 @@ func (a *App) Run() error {
 }
 
 func (a *App) setupUI() {
-	// Message display area with rich text
-	a.messages = widget.NewRichText()
-	a.messagesScroll = container.NewScroll(a.messages)
+	messageList := container.NewVBox()
+	a.messageList = messageList
+	a.messagesScroll = container.NewVScroll(messageList)
 	messagesContainer := createBorderedContainer(a.messagesScroll, "Talkie Chat Room")
 
 	// User list with status indicators
@@ -148,12 +150,16 @@ func (a *App) setupUI() {
 		content = ConvertEmojis(content)
 		a.sendMessage(content)
 	}
+	sendFileBtn := widget.NewButtonWithIcon("File", theme.FileIcon(), func() {
+		a.showFilePicker()
+	})
 
 	emojiBtn := widget.NewButton("☺", a.showEmojiPicker)
 
 	inputBox := container.NewBorder(
 		nil, nil,
-		emojiBtn, sendBtn,
+		container.NewHBox(emojiBtn, sendFileBtn),
+		sendBtn,
 		a.input,
 	)
 
@@ -266,7 +272,6 @@ func (a *App) processMessage(msg string) {
 	if strings.HasPrefix(msg, "Active users: ") {
 		users := strings.TrimPrefix(msg, "Active users: ")
 		rawUsers := strings.Split(users, ",")
-
 		a.users = make([]string, len(rawUsers))
 		for i, u := range rawUsers {
 			u = strings.TrimSpace(u)
@@ -279,6 +284,26 @@ func (a *App) processMessage(msg string) {
 		a.userList.Refresh()
 		return
 	}
+	if idx := strings.Index(msg, "[FILE]"); idx != -1 {
+		s := strings.TrimSpace(msg[idx+len("[FILE]"):])
+		parts := strings.SplitN(s, ":", 2)
+		if len(parts) == 2 {
+			from := strings.TrimSpace(parts[0])
+			filename := strings.TrimSpace(parts[1])
+
+			btn := widget.NewButton(fmt.Sprintf("⬇ Download %s", filename), func() {
+				a.downloadFile(filename)
+			})
+			box := container.NewVBox(
+				widget.NewLabel(fmt.Sprintf("%s sent a file:", from)),
+				btn,
+			)
+			a.messageList.Add(box)
+			a.messagesScroll.Refresh()
+			a.messagesScroll.ScrollToBottom()
+			return
+		}
+	}
 
 	var colorName fyne.ThemeColorName
 
@@ -287,7 +312,7 @@ func (a *App) processMessage(msg string) {
 		colorName = theme.ColorNamePlaceHolder
 	case strings.HasPrefix(msg, "(Global)"):
 		colorName = theme.ColorNameWarning
-	case strings.HasPrefix(msg, "(Private"): //Because syntax is (Private to {user}), so we only need to check (Private
+	case strings.HasPrefix(msg, "(Private"):
 		colorName = theme.ColorNamePrimary
 	default:
 		colorName = theme.ColorNameForeground
@@ -302,15 +327,25 @@ func (a *App) processMessage(msg string) {
 	segment := &widget.TextSegment{
 		Style: widget.RichTextStyle{
 			ColorName: colorName,
-			Inline:	true,
+			Inline:    true,
 		},
 		Text: displayMsg + "\n",
 	}
+
 	a.messages.Segments = append(a.messages.Segments, segment)
 	a.messages.Refresh()
-	a.messagesScroll.ScrollToBottom()
+
 }
 
+func (a *App) downloadFile(filename string) {
+	go func() {
+		if err := a.client.RequestFile(filename); err != nil {
+			dialog.ShowError(fmt.Errorf("failed to request file: %v", err), a.mainWindow)
+			return
+		}
+		dialog.ShowInformation("Downloading", fmt.Sprintf("Downloading %s...", filename), a.mainWindow)
+	}()
+}
 
 func (a *App) sendMessage(content string) {
 	var err error
@@ -345,4 +380,30 @@ func (a *App) reopenLogin() {
 		time.Sleep(2000 * time.Millisecond)
 		a.showLoginDialog()
 	}()
+}
+
+func (a *App) showFilePicker() {
+	dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
+		if err != nil {
+			dialog.ShowError(err, a.mainWindow)
+			return
+		}
+		if reader == nil {
+			return
+		}
+		filePath := reader.URI().Path()
+		reader.Close()
+
+		go func() {
+			uploadMsg := widget.NewLabel(fmt.Sprintf("Uploading file: %s...\n", filepath.Base(filePath)))
+			a.messageList.Add(uploadMsg)
+			a.messageList.Refresh()
+
+			if err := a.client.SendFile(filePath); err != nil {
+				dialog.ShowError(fmt.Errorf("failed to send file: %v", err), a.mainWindow)
+				return
+			}
+			a.messageList.Refresh()
+		}()
+	}, a.mainWindow)
 }
