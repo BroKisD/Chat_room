@@ -280,6 +280,19 @@ func (a *App) processMessage(msg string) {
 		return
 	}
 
+	var colorName fyne.ThemeColorName
+
+	switch {
+	case strings.HasPrefix(msg, "(System)"):
+		colorName = theme.ColorNamePlaceHolder
+	case strings.HasPrefix(msg, "(Global)"):
+		colorName = theme.ColorNameWarning
+	case strings.HasPrefix(msg, "(Private"): //Because syntax is (Private to {user}), so we only need to check (Private
+		colorName = theme.ColorNamePrimary
+	default:
+		colorName = theme.ColorNameForeground
+	}
+
 	displayMsg := msg
 	prefix := a.client.GetUsername() + ":"
 	if strings.HasPrefix(msg, prefix) {
@@ -288,7 +301,8 @@ func (a *App) processMessage(msg string) {
 
 	segment := &widget.TextSegment{
 		Style: widget.RichTextStyle{
-			ColorName: theme.ColorNameForeground,
+			ColorName: colorName,
+			Inline:	true,
 		},
 		Text: displayMsg + "\n",
 	}
