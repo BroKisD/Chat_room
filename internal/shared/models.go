@@ -23,6 +23,10 @@ const (
 	TypePublicKeyRequest  MessageType = "public_key_request"
 	TypePublicKeyResponse MessageType = "public_key_response"
 	TypeReconnect         MessageType = "reconnect"
+	TypeFileTransfer      MessageType = "file_transfer"
+	TypeInfo              MessageType = "info"
+	TypeFileDownload      MessageType = "file_download"
+	TypeFileAvailable     MessageType = "file_available"
 )
 
 type Message struct {
@@ -36,6 +40,7 @@ type Message struct {
 	Error         string      `json:"error,omitempty"`          // For error messages
 	EncryptedKey  string      `json:"encrypted_key,omitempty"`  // base64 of RSA-encrypted AES key
 	EncryptedData string      `json:"encrypted_data,omitempty"` // base64 of AES-encrypted content
+	Filename      string      `json:"filename,omitempty"`       // Original filename of attached file
 }
 
 type User struct {

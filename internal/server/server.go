@@ -11,32 +11,39 @@ import (
 	"sync"
 
 	"chatroom/internal/server/auth"
+	"chatroom/internal/server/filetransfer"
 	"chatroom/internal/server/users"
 	"chatroom/internal/shared"
 )
 
 type Server struct {
-	listener    net.Listener
-	addr        string
-	auth        *auth.Authenticator
-	users       *users.Manager
-	mu          sync.RWMutex
-	broadcastCh chan *shared.Message
-	done        chan struct{}
-	connections sync.WaitGroup
-	roomKey     []byte
-	stateFile   string
+	listener     net.Listener
+	addr         string
+	auth         *auth.Authenticator
+	users        *users.Manager
+	mu           sync.RWMutex
+	broadcastCh  chan *shared.Message
+	done         chan struct{}
+	connections  sync.WaitGroup
+	roomKey      []byte
+	stateFile    string
+	fileTransfer *filetransfer.FileTransfer
 }
 
 func New(addr string) *Server {
+	uploadDir := "uploads"
+	os.MkdirAll(uploadDir, 0755)
+
 	s := &Server{
-		addr:        addr,
-		auth:        auth.New(),
-		users:       users.New(),
-		broadcastCh: make(chan *shared.Message, 100),
-		done:        make(chan struct{}),
-		stateFile:   "server_state.json",
+		addr:         addr,
+		auth:         auth.New(),
+		users:        users.New(),
+		broadcastCh:  make(chan *shared.Message, 100),
+		done:         make(chan struct{}),
+		stateFile:    "server_state.json",
+		fileTransfer: filetransfer.New(uploadDir),
 	}
+
 	s.loadOrGenerateRoomKey()
 
 	// Try loading saved state
