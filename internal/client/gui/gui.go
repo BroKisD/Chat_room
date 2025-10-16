@@ -312,7 +312,7 @@ func (a *App) processMessage(msg string) {
 		colorName = theme.ColorNamePlaceHolder
 	case strings.HasPrefix(msg, "(Global)"):
 		colorName = theme.ColorNameWarning
-	case strings.HasPrefix(msg, "(Private"):
+	case strings.HasPrefix(msg, "(Private)"):
 		colorName = theme.ColorNamePrimary
 	default:
 		colorName = theme.ColorNameForeground
@@ -332,9 +332,12 @@ func (a *App) processMessage(msg string) {
 		Text: displayMsg + "\n",
 	}
 
-	a.messages.Segments = append(a.messages.Segments, segment)
-	a.messages.Refresh()
+	msgRichText := widget.NewRichText(segment)
+	msgRichText.Wrapping = fyne.TextWrapWord
 
+	a.messageList.Add(msgRichText)
+	a.messagesScroll.Refresh()
+	a.messagesScroll.ScrollToBottom()
 }
 
 func (a *App) downloadFile(filename string) {
