@@ -32,6 +32,7 @@ type App struct {
 	msgHistory     []string
 	incoming       chan string
 	messageList    *fyne.Container
+	currentMsg     string // Keep track of the current message context
 }
 
 func NewApp(client *client.Client) *App {
@@ -40,6 +41,7 @@ func NewApp(client *client.Client) *App {
 		msgHistory: make([]string, 0),
 		users:      make([]string, 0),
 		incoming:   make(chan string, 100),
+		currentMsg: "",
 	}
 
 	client.SetMessageHandler(func(msg string) {
@@ -284,13 +286,13 @@ func (a *App) processMessage(msg string) {
 		a.userList.Refresh()
 		return
 	}
+
 	if idx := strings.Index(msg, "[FILE]"); idx != -1 {
 		s := strings.TrimSpace(msg[idx+len("[FILE]"):])
 		parts := strings.SplitN(s, ":", 2)
 		if len(parts) == 2 {
 			from := strings.TrimSpace(parts[0])
 			filename := strings.TrimSpace(parts[1])
-
 			btn := widget.NewButton(fmt.Sprintf("⬇ Download %s", filename), func() {
 				a.downloadFile(filename)
 			})
@@ -302,6 +304,32 @@ func (a *App) processMessage(msg string) {
 			a.messagesScroll.Refresh()
 			a.messagesScroll.ScrollToBottom()
 			return
+		}
+	}
+
+	if idx := strings.Index(msg, "[PRIVATE FILE]"); idx != -1 {
+		s := strings.TrimSpace(msg[idx+len("[PRIVATE FILE]"):])
+		if strings.Contains(s, " sent you: ") {
+			parts := strings.SplitN(s, " sent you: ", 2)
+			if len(parts) == 2 {
+				from := strings.TrimSpace(parts[0])
+				filename := strings.TrimSpace(parts[1])
+
+				btn := widget.NewButton(fmt.Sprintf("Download %s", filename), func() {
+					a.downloadPrivateFile(filename, from)
+				})
+
+				box := container.NewVBox(
+					widget.NewLabel(fmt.Sprintf("%s sent you a private file:", from)),
+					btn,
+				)
+				box.Objects[0].(*widget.Label).Importance = widget.HighImportance
+
+				a.messageList.Add(box)
+				a.messagesScroll.Refresh()
+				a.messagesScroll.ScrollToBottom()
+				return
+			}
 		}
 	}
 
@@ -350,6 +378,16 @@ func (a *App) downloadFile(filename string) {
 	}()
 }
 
+func (a *App) downloadPrivateFile(filename, sender string) {
+	go func() {
+		if err := a.client.RequestPrivateFile(filename, sender); err != nil {
+			dialog.ShowError(fmt.Errorf("failed to request private file: %v", err), a.mainWindow)
+			return
+		}
+		dialog.ShowInformation("Downloading", fmt.Sprintf("Downloading private file %s from %s...", filename, sender), a.mainWindow)
+	}()
+}
+
 func (a *App) sendMessage(content string) {
 	var err error
 	raw := content
@@ -386,27 +424,78 @@ func (a *App) reopenLogin() {
 }
 
 func (a *App) showFilePicker() {
-	dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
-		if err != nil {
-			dialog.ShowError(err, a.mainWindow)
-			return
-		}
-		if reader == nil {
-			return
-		}
-		filePath := reader.URI().Path()
-		reader.Close()
+	options := []string{"Public", "Private"}
+	selected := widget.NewSelect(options, nil)
+	selected.SetSelected("Public")
 
-		go func() {
-			uploadMsg := widget.NewLabel(fmt.Sprintf("Uploading file: %s...\n", filepath.Base(filePath)))
-			a.messageList.Add(uploadMsg)
-			a.messageList.Refresh()
+	recipient := widget.NewEntry()
+	recipient.SetPlaceHolder("Enter recipient username (for Private only)")
+	recipient.Disable()
 
-			if err := a.client.SendFile(filePath); err != nil {
-				dialog.ShowError(fmt.Errorf("failed to send file: %v", err), a.mainWindow)
+	selected.OnChanged = func(value string) {
+		if value == "Private" {
+			recipient.Enable()
+		} else {
+			recipient.Disable()
+		}
+	}
+
+	dialog.ShowCustomConfirm(
+		"Send File",
+		"Next",
+		"Cancel",
+		container.NewVBox(
+			widget.NewLabel("Choose how to send your file:"),
+			selected,
+			recipient,
+		),
+		func(confirm bool) {
+			if !confirm {
 				return
 			}
-			a.messageList.Refresh()
-		}()
-	}, a.mainWindow)
+
+			dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
+				if err != nil {
+					dialog.ShowError(err, a.mainWindow)
+					return
+				}
+				if reader == nil {
+					return
+				}
+				filePath := reader.URI().Path()
+				reader.Close()
+
+				go func() {
+					uploadMsg := widget.NewLabel(fmt.Sprintf("Uploading file: %s...", filepath.Base(filePath)))
+					a.messageList.Add(uploadMsg)
+					a.messageList.Refresh()
+
+					var sendErr error
+					if selected.Selected == "Private" {
+						toUser := strings.TrimSpace(recipient.Text)
+						if toUser == "" {
+							dialog.ShowError(fmt.Errorf("recipient username is required for private file"), a.mainWindow)
+							return
+						}
+						sendErr = a.client.SendPrivateFile(filePath, toUser)
+					} else {
+						sendErr = a.client.SendFile(filePath)
+					}
+
+					if sendErr != nil {
+						dialog.ShowError(fmt.Errorf("failed to send file: %v", sendErr), a.mainWindow)
+						return
+					}
+
+					fyne.CurrentApp().SendNotification(&fyne.Notification{
+						Title:   "File Sent",
+						Content: fmt.Sprintf("%s uploaded successfully", filepath.Base(filePath)),
+					})
+
+					a.messageList.Refresh()
+				}()
+			}, a.mainWindow)
+		},
+		a.mainWindow,
+	)
 }

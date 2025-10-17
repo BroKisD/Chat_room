@@ -10,23 +10,26 @@ import (
 type MessageType string
 
 const (
-	TypeAuth              MessageType = "auth"      // Authentication messages
-	TypeAuthResponse      MessageType = "auth_resp" // Authentication response
-	TypePublic            MessageType = "public"    // Public messages
-	TypePrivate           MessageType = "private"   // Private messages
-	TypeUserList          MessageType = "user_list" // User list updates
-	TypeError             MessageType = "error"     // Error messages
-	TypeJoin              MessageType = "join"      // User join notification
-	TypeLeave             MessageType = "leave"     // User leave notification
-	TypePublicKey         MessageType = "public_key"
-	TypeRoomKey           MessageType = "room_key"
-	TypePublicKeyRequest  MessageType = "public_key_request"
-	TypePublicKeyResponse MessageType = "public_key_response"
-	TypeReconnect         MessageType = "reconnect"
-	TypeFileTransfer      MessageType = "file_transfer"
-	TypeInfo              MessageType = "info"
-	TypeFileDownload      MessageType = "file_download"
-	TypeFileAvailable     MessageType = "file_available"
+	TypeAuth                         MessageType = "auth"      // Authentication messages
+	TypeAuthResponse                 MessageType = "auth_resp" // Authentication response
+	TypePublic                       MessageType = "public"    // Public messages
+	TypePrivate                      MessageType = "private"   // Private messages
+	TypeUserList                     MessageType = "user_list" // User list updates
+	TypeError                        MessageType = "error"     // Error messages
+	TypeJoin                         MessageType = "join"      // User join notification
+	TypeLeave                        MessageType = "leave"     // User leave notification
+	TypePublicKey                    MessageType = "public_key"
+	TypeRoomKey                      MessageType = "room_key"
+	TypePublicKeyRequest             MessageType = "public_key_request"
+	TypePublicKeyResponse            MessageType = "public_key_response"
+	TypeReconnect                    MessageType = "reconnect"
+	TypeFileTransfer                 MessageType = "file_transfer"
+	TypeInfo                         MessageType = "info"
+	TypeFileDownload                 MessageType = "file_download"
+	TypeFileAvailable                MessageType = "file_available"
+	TypePrivateFileTransfer          MessageType = "private_file_transfer"
+	TypePrivateFileTransferAvailable MessageType = "private_file_transfer_available"
+	TypePrivateFileDownload          MessageType = "private_file_download"
 )
 
 type Message struct {
@@ -43,6 +46,11 @@ type Message struct {
 	Filename      string      `json:"filename,omitempty"`       // Original filename of attached file
 }
 
+type PendingFileTransfer struct {
+	Filename string
+	Target   string
+}
+
 type User struct {
 	Username     string    `json:"username"`
 	JoinedAt     time.Time `json:"joinedAt"`
@@ -56,4 +64,12 @@ func (u *User) WriteMessage(msg *Message) error {
 	u.writeMu.Lock()
 	defer u.writeMu.Unlock()
 	return WriteMessage(u.Conn, msg)
+}
+
+type EncryptedFileData struct {
+	EncryptedKey  string `json:"encrypted_key"`  // AES key đã được RSA mã hóa (base64)
+	EncryptedData string `json:"encrypted_data"` // Dữ liệu file đã được AES mã hóa (base64)
+	Filename      string `json:"filename"`
+	From          string `json:"from"`
+	To            string `json:"to"`
 }

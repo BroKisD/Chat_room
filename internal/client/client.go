@@ -15,24 +15,26 @@ import (
 )
 
 type Client struct {
-	conn              *networking.Connection
-	username          string
-	activeUsers       []string
-	onMessage         func(msg string)
-	privateKey        *rsa.PrivateKey
-	publicKey         *rsa.PublicKey
-	roomKey           []byte
-	PublicKeyCache    *PublicKeyCache
-	PendingPrivateMsg map[string][]string
-	mu                sync.Mutex
-	autoReconnect     bool
+	conn                *networking.Connection
+	username            string
+	activeUsers         []string
+	onMessage           func(msg string)
+	privateKey          *rsa.PrivateKey
+	publicKey           *rsa.PublicKey
+	roomKey             []byte
+	PublicKeyCache      *PublicKeyCache
+	PendingPrivateMsg   map[string][]string
+	PendingPrivateFiles []shared.PendingFileTransfer
+	mu                  sync.Mutex
+	autoReconnect       bool
 }
 
 func New() *Client {
 	return &Client{
-		conn:              networking.NewConnection(),
-		PublicKeyCache:    NewPublicKeyCache(),
-		PendingPrivateMsg: make(map[string][]string),
+		conn:                networking.NewConnection(),
+		PublicKeyCache:      NewPublicKeyCache(),
+		PendingPrivateMsg:   make(map[string][]string),
+		PendingPrivateFiles: make([]shared.PendingFileTransfer, 0),
 	}
 }
 
@@ -208,6 +210,13 @@ func (c *Client) handleMessages() {
 			c.displaySystemMessage(msg)
 		case shared.TypeFileTransfer:
 			c.SendFile(msg.Filename)
+		case shared.TypePrivateFileTransferAvailable:
+			c.displaySystemMessage(msg)
+		case shared.TypePrivateFileTransfer:
+			c.SendPrivateFile(msg.Filename, msg.To)
+		case shared.TypePrivateFileDownload:
+			c.SaveReceivedPrivateFile(msg)
+
 		default:
 			fmt.Println("Unknown message type:", msg.Type)
 		}
@@ -311,7 +320,7 @@ func (c *Client) DecryptPrivateMessage(msg *shared.Message) *shared.Message {
 		fmt.Println("Failed to decrypt private message:", err)
 		return nil
 	}
-	msg.Content = plainBytes
+	msg.Content = string(plainBytes)
 	return msg
 }
 func (c *Client) handlePublicKeyResponse(msg *shared.Message) {
@@ -337,6 +346,17 @@ func (c *Client) handlePublicKeyResponse(msg *shared.Message) {
 		}
 		delete(c.PendingPrivateMsg, msg.From)
 	}
+
+	// Process pending file transfers
+	var remainingFiles []shared.PendingFileTransfer
+	for _, pendingFile := range c.PendingPrivateFiles {
+		if pendingFile.Target == msg.From {
+			_ = c.SendPrivateFile(pendingFile.Filename, pendingFile.Target)
+		} else {
+			remainingFiles = append(remainingFiles, pendingFile)
+		}
+	}
+	c.PendingPrivateFiles = remainingFiles
 	c.mu.Unlock()
 }
 
@@ -437,4 +457,106 @@ func (c *Client) saveReceivedFile(msg *shared.Message) {
 	}
 
 	fmt.Printf("[File] Saved file to %s\n", savePath)
+}
+
+func (c *Client) SendPrivateFile(filename string, target string) error {
+	file, err := os.Open(filename)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %v", err)
+	}
+	defer file.Close()
+
+	targetPubKey, exists := c.PublicKeyCache.Get(target)
+	if !exists {
+		// Store the file details in pending queue
+		c.mu.Lock()
+		c.PendingPrivateFiles = append(c.PendingPrivateFiles, shared.PendingFileTransfer{
+			Filename: filename,
+			Target:   target,
+		})
+		c.mu.Unlock()
+
+		// Request the public key
+		req := &shared.Message{
+			Type: shared.TypePublicKeyRequest,
+			From: c.username,
+			To:   target,
+		}
+		return c.conn.Send(req)
+	}
+
+	fileName := filepath.Base(filename)
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %v", err)
+	}
+
+	encKeyB64, encDataB64, err := shared.Encrypt(string(fileBytes), targetPubKey)
+	if err != nil {
+		return err
+	}
+
+	// First send the encrypted file data
+	msg := &shared.Message{
+		Type:         shared.TypePrivateFileTransfer,
+		From:         c.username,
+		To:           target,
+		Filename:     fileName,
+		EncryptedKey: encKeyB64,
+		Content:      encDataB64,
+		Timestamp:    time.Now(),
+	}
+	if err := c.conn.Send(msg); err != nil {
+		return fmt.Errorf("failed to send file message: %v", err)
+	}
+
+	// Then send the file availability message that will trigger the download button
+	availableMsg := &shared.Message{
+		Type:      shared.TypePrivateFileTransferAvailable,
+		From:      c.username,
+		To:        target,
+		Content:   fmt.Sprintf("[FILE] %s: %s", c.username, fileName), // Format to match the UI's expected format
+		Filename:  fileName,
+		Timestamp: time.Now(),
+	}
+	if err := c.conn.Send(availableMsg); err != nil {
+		fmt.Printf("[Warning] Failed to broadcast file availability: %v\n", err)
+	}
+
+	fmt.Printf("[File] Sent file %s to %s\n", fileName, target)
+
+	return nil
+}
+
+func (c *Client) RequestPrivateFile(filename, target string) error {
+	msg := &shared.Message{
+		Type:     shared.TypePrivateFileDownload,
+		From:     c.username,
+		To:       target,
+		Filename: filename,
+	}
+	return c.conn.Send(msg)
+}
+
+func (c *Client) SaveReceivedPrivateFile(msg *shared.Message) error {
+	data, err := shared.Decrypt(msg.EncryptedKey, msg.Content, c.privateKey)
+	if err != nil {
+		fmt.Println("Failed to decode private file:", err)
+		return err
+	}
+
+	downloadDir := "downloads"
+	if err := os.MkdirAll(downloadDir, 0755); err != nil {
+		fmt.Println("Failed to create Downloads directory:", err)
+		return err
+	}
+
+	savePath := filepath.Join(downloadDir, msg.Filename)
+	if err := os.WriteFile(savePath, data, 0644); err != nil {
+		fmt.Println("Failed to save file:", err)
+		return err
+	}
+
+	fmt.Printf("[File] Saved private file to %s\n", savePath)
+	return nil
 }

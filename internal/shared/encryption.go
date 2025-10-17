@@ -53,43 +53,43 @@ func Encrypt(plain string, recipientPub *rsa.PublicKey) (string, string, error) 
 	return encKeyB64, encDataB64, nil
 }
 
-func Decrypt(encKeyB64, encDataB64 string, priv *rsa.PrivateKey) (string, error) {
+func Decrypt(encKeyB64, encDataB64 string, priv *rsa.PrivateKey) ([]byte, error) {
 	encKeyBytes, err := base64.StdEncoding.DecodeString(encKeyB64)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	encData, err := base64.StdEncoding.DecodeString(encDataB64)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// 1) RSA-OAEP decrypt aesKey
 	label := []byte("")
 	aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, priv, encKeyBytes, label)
 	if err != nil {
-		return "", fmt.Errorf("rsa decrypt failed: %w", err)
+		return nil, fmt.Errorf("rsa decrypt failed: %w", err)
 	}
 
 	// 2) AES-GCM decrypt: split nonce and ciphertext (nonce size depends on GCM)
 	block, err := aes.NewCipher(aesKey)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	nonceSize := gcm.NonceSize()
 	if len(encData) < nonceSize {
-		return "", fmt.Errorf("ciphertext too short")
+		return nil, fmt.Errorf("ciphertext too short")
 	}
 	nonce := encData[:nonceSize]
 	cipherText := encData[nonceSize:]
 	plain, err := gcm.Open(nil, nonce, cipherText, nil)
 	if err != nil {
-		return "", fmt.Errorf("aes-gcm open failed: %w", err)
+		return nil, fmt.Errorf("aes-gcm open failed: %w", err)
 	}
-	return string(plain), nil
+	return plain, nil
 }
 
 // GenerateRSAKeyPair generates RSA private key with bits (2048 or 4096 recommended)
