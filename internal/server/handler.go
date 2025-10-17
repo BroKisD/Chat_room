@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"chatroom/internal/shared"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -127,6 +128,27 @@ func (s *Server) handleMessage(user *shared.User, msg *shared.Message) error {
 
 	msg.From = user.Username
 	msg.Timestamp = time.Now()
+
+	if msg.Type == shared.TypePrivateFileTransfer {
+		log.Printf("[DEBUG] Handling file transfer from %s", user.Username)
+		err := s.HandlePrivateFileTransfer(user, msg)
+		if err != nil {
+			log.Printf("[ERROR] Failed to handle file transfer from %s: %v", user.Username, err)
+		}
+		return err
+
+	}
+
+	if msg.Type == shared.TypePrivateFileDownload {
+		log.Printf("[DEBUG] Handling file download request from %s for file %s",
+			user.Username, msg.Filename)
+		err := s.HandlePrivateFileRequest(user, msg)
+		if err != nil {
+			log.Printf("[ERROR] Failed to handle file request from %s: %v",
+				user.Username, err)
+		}
+		return err
+	}
 
 	if msg.Type == shared.TypeFileDownload {
 		log.Printf("[DEBUG] Handling file download request from %s for file %s",
@@ -513,5 +535,121 @@ func (s *Server) HandleFileRequest(user *shared.User, msg *shared.Message) error
 	}
 
 	log.Printf("[INFO] Sent file '%s' to %s successfully", filename, user.Username)
+	return nil
+}
+
+func (s *Server) HandlePrivateFileTransfer(user *shared.User, msg *shared.Message) error {
+	if msg.Filename == "" || msg.Content == "" || msg.To == "" || msg.EncryptedKey == "" {
+		log.Printf("[WARN] Invalid private file transfer message from %s", user.Username)
+		s.sendError(user.Username, "Invalid private file transfer message (missing filename, content, encrypted key, or recipient)")
+		return fmt.Errorf("invalid private file message from %s", user.Username)
+	}
+
+	s.mu.RLock()
+	recipient, exists := s.users.GetByUsername(msg.To)
+	s.mu.RUnlock()
+
+	if !exists {
+		s.sendError(user.Username, fmt.Sprintf("User '%s' not found", msg.To))
+		return fmt.Errorf("recipient %s not found", msg.To)
+	}
+
+	filename := filepath.Base(msg.Filename)
+
+	fileData := shared.EncryptedFileData{
+		EncryptedKey:  msg.EncryptedKey,
+		EncryptedData: msg.Content,
+		Filename:      filename,
+		From:          user.Username,
+		To:            msg.To,
+	}
+
+	jsonData, err := json.Marshal(fileData)
+	if err != nil {
+		log.Printf("[ERROR] Failed to marshal file data: %v", err)
+		s.sendError(user.Username, "Failed to process file data")
+		return err
+	}
+
+	privateFilename := fmt.Sprintf("private_%s_to_%s_%s.enc", user.Username, msg.To, filename)
+	reader := bytes.NewReader(jsonData)
+
+	if err := s.fileTransfer.Upload(privateFilename, reader); err != nil {
+		log.Printf("[ERROR] Failed to save private file %s: %v", privateFilename, err)
+		s.sendError(user.Username, fmt.Sprintf("Failed to save file %s", filename))
+		return err
+	}
+
+	log.Printf("[INFO] Private file received: %s from %s to %s", filename, user.Username, msg.To)
+
+	ack := &shared.Message{
+		Type:      shared.TypeInfo,
+		Content:   fmt.Sprintf("Private file '%s' sent to %s successfully.", filename, msg.To),
+		Timestamp: time.Now(),
+	}
+	user.WriteMessage(ack)
+
+	notify := &shared.Message{
+		Type:      shared.TypePrivateFileTransferAvailable,
+		From:      user.Username,
+		To:        msg.To,
+		Filename:  filename,
+		Content:   fmt.Sprintf("[PRIVATE FILE] %s sent you: %s", user.Username, filename),
+		Timestamp: time.Now(),
+	}
+	recipient.WriteMessage(notify)
+
+	return nil
+}
+
+func (s *Server) HandlePrivateFileRequest(user *shared.User, msg *shared.Message) error {
+	if msg.Filename == "" || msg.To == "" {
+		s.sendError(user.Username, "Missing filename or sender in private file request")
+		return fmt.Errorf("missing filename or sender in request from %s", user.Username)
+	}
+
+	filename := filepath.Base(msg.Filename)
+
+	privateFilename := fmt.Sprintf("private_%s_to_%s_%s.enc", msg.To, user.Username, filename)
+	path := filepath.Join(s.fileTransfer.UploadDir(), privateFilename)
+
+	file, err := os.Open(path)
+	if err != nil {
+		log.Printf("[ERROR] Failed to open requested private file %s: %v", privateFilename, err)
+		s.sendError(user.Username, fmt.Sprintf("Private file '%s' from %s not found", filename, msg.To))
+		return err
+	}
+	defer file.Close()
+
+	jsonData, err := io.ReadAll(file)
+	if err != nil {
+		log.Printf("[ERROR] Failed to read private file %s: %v", privateFilename, err)
+		s.sendError(user.Username, fmt.Sprintf("Failed to read file '%s'", filename))
+		return err
+	}
+
+	var fileData shared.EncryptedFileData
+	if err := json.Unmarshal(jsonData, &fileData); err != nil {
+		log.Printf("[ERROR] Failed to unmarshal file data: %v", err)
+		s.sendError(user.Username, "Failed to process file data")
+		return err
+	}
+
+	resp := &shared.Message{
+		Type:         shared.TypePrivateFileDownload,
+		From:         msg.To,
+		To:           user.Username,
+		Filename:     filename,
+		EncryptedKey: fileData.EncryptedKey,
+		Content:      fileData.EncryptedData,
+		Timestamp:    time.Now(),
+	}
+
+	if err := user.WriteMessage(resp); err != nil {
+		log.Printf("[ERROR] Failed to send private file %s to %s: %v", filename, user.Username, err)
+		return err
+	}
+
+	log.Printf("[INFO] Sent private file '%s' from %s to %s successfully", filename, msg.To, user.Username)
 	return nil
 }
