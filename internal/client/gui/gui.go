@@ -212,6 +212,13 @@ func (a *App) showLoginDialog() {
 		}
 
 		if err := a.client.Connect(":9000"); err != nil {
+
+			if strings.Contains(err.Error(), "username") {
+				dialog.ShowError(fmt.Errorf("login failed: %s", err.Error()), a.mainWindow)
+				a.reopenLogin()
+				return
+			}
+
 			dialog.ShowConfirm("Connection failed",
 				"Cannot connect to server.\nDo you want to retry?",
 				func(confirm bool) {
@@ -452,6 +459,19 @@ func (a *App) showFilePicker() {
 		func(confirm bool) {
 			if !confirm {
 				return
+			}
+
+			toUser := strings.TrimSpace(recipient.Text)
+
+			if selected.Selected == "Private" {
+				if toUser == "" {
+					dialog.ShowError(fmt.Errorf("recipient username is required"), a.mainWindow)
+					return
+				}
+				if !a.client.UserExists(toUser) {
+					dialog.ShowError(fmt.Errorf("user '%s' not found", toUser), a.mainWindow)
+					return
+				}
 			}
 
 			dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {

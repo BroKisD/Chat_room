@@ -23,29 +23,33 @@ func (s *Server) handleConnection(conn net.Conn) {
 	log.Printf("[INFO] New connection from %s", addr)
 
 	reader := bufio.NewReader(conn)
-	msg, err := shared.ReadMessage(reader)
 
-	if err != nil {
-		log.Printf("[ERROR] Failed to read auth message from %s: %v", addr, err)
-		return
+	var user *shared.User
+
+	// AUTH LOOP
+	for {
+		msg, err := shared.ReadMessage(reader)
+		if err != nil {
+			log.Printf("[ERROR] Failed to read auth message from %s: %v", addr, err)
+			return
+		}
+
+		if msg.Type != shared.TypeAuth {
+			s.sendError(conn, "First message must be authentication")
+			continue
+		}
+
+		u, err := s.users.AuthenticateUser(msg.From, conn)
+		if err != nil {
+			s.sendAuthResponse(conn, false, err.Error())
+			continue
+		}
+
+		user = u
+
+		s.sendAuthResponse(conn, true, "")
+		break
 	}
-
-	log.Printf("[INFO] Received auth message from %s: %+v", addr, msg)
-
-	if msg.Type != shared.TypeAuth {
-		s.sendError(conn, "First message must be authentication")
-		return
-	}
-
-	// Try to authenticate
-	user, err := s.users.AuthenticateUser(msg.From, conn)
-	if err != nil {
-		s.sendError(conn, err.Error())
-		return
-	}
-
-	// Send successful auth response
-	s.sendAuthResponse(conn, true, "")
 
 	// Notify others about new users
 	s.broadcastUserJoin(user.Username)

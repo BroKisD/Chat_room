@@ -560,3 +560,12 @@ func (c *Client) SaveReceivedPrivateFile(msg *shared.Message) error {
 	fmt.Printf("[File] Saved private file to %s\n", savePath)
 	return nil
 }
+
+func (c *Client) UserExists(target string) bool {
+	for _, u := range c.activeUsers {
+		if u == target {
+			return true
+		}
+	}
+	return false
+}
