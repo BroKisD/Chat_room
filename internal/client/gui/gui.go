@@ -212,6 +212,13 @@ func (a *App) showLoginDialog() {
 		}
 
 		if err := a.client.Connect(":9000"); err != nil {
+
+			if strings.Contains(err.Error(), "username") {
+				dialog.ShowError(fmt.Errorf("login failed: %s", err.Error()), a.mainWindow)
+				a.reopenLogin()
+				return
+			}
+
 			dialog.ShowConfirm("Connection failed",
 				"Cannot connect to server.\nDo you want to retry?",
 				func(confirm bool) {
