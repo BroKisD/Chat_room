@@ -32,7 +32,7 @@ type App struct {
 	msgHistory     []string
 	incoming       chan string
 	messageList    *fyne.Container
-	currentMsg     string // Keep track of the current message context
+	currentMsg     string
 }
 
 func NewApp(client *client.Client) *App {
@@ -54,37 +54,26 @@ func NewApp(client *client.Client) *App {
 	return a
 }
 
-func createBorderedContainer(content fyne.CanvasObject, title string) *fyne.Container {
-	// Create an orange border
-	orange := color.NRGBA{R: 255, G: 140, A: 255} // orange
-	border := canvas.NewRectangle(color.White)
-	border.StrokeWidth = 3
-	border.StrokeColor = orange
-	border.FillColor = color.White
+func createSimpleBox(content fyne.CanvasObject, title string, bgColor color.Color) *fyne.Container {
+	bg := canvas.NewRectangle(bgColor)
 
-	// Create title if provided
-	var titleObj fyne.CanvasObject
 	if title != "" {
-		titleText := canvas.NewText(title, orange)
-		titleText.TextSize = 20
-		titleBg := canvas.NewRectangle(color.White)
-		titleBg.StrokeWidth = 0
-		titleObj = container.NewStack(titleBg, titleText)
+		titleLabel := widget.NewLabel(title)
+		titleLabel.TextStyle = fyne.TextStyle{Bold: true}
+		header := container.NewVBox(titleLabel, widget.NewSeparator())
+		return container.NewStack(
+			bg,
+			container.NewBorder(header, nil, nil, nil, container.NewPadded(content)),
+		)
 	}
-
-	if titleObj != nil {
-		return container.NewBorder(titleObj, nil, nil, nil,
-			container.NewStack(border, content))
-	}
-	return container.NewStack(border, content)
+	return container.NewStack(bg, container.NewPadded(content))
 }
 
 func (a *App) Run() error {
 	fyneApp := app.NewWithID("com.chatroom.app")
 	fyneApp.Settings().SetTheme(theme.LightTheme())
-	a.mainWindow = fyneApp.NewWindow("Talkie")
-	a.mainWindow.Resize(fyne.NewSize(500, 600))
-
+	a.mainWindow = fyneApp.NewWindow("Talkie Chat")
+	a.mainWindow.Resize(fyne.NewSize(800, 600))
 	a.mainWindow.CenterOnScreen()
 
 	iconPath := "assets/app_icon.png"
@@ -96,13 +85,9 @@ func (a *App) Run() error {
 		a.mainWindow.SetIcon(iconResource)
 	}
 
-	// Setup main UI components
 	a.setupUI()
-
-	// Show login dialog first
 	a.showLoginDialog()
 
-	// Set close handler
 	a.mainWindow.SetCloseIntercept(func() {
 		if a.connected {
 			a.client.Disconnect()
@@ -115,80 +100,109 @@ func (a *App) Run() error {
 }
 
 func (a *App) setupUI() {
+	// Messages area
 	messageList := container.NewVBox()
 	a.messageList = messageList
 	a.messagesScroll = container.NewVScroll(messageList)
-	messagesContainer := createBorderedContainer(a.messagesScroll, "Talkie Chat Room")
 
-	// User list with status indicators
+	messagesContainer := createSimpleBox(a.messagesScroll, "Chat Room", color.White)
+
+	// User list - simple and clean with light blue background
 	a.userList = widget.NewList(
 		func() int { return len(a.users) },
 		func() fyne.CanvasObject {
-			return container.NewHBox(
-				canvas.NewCircle(color.NRGBA{G: 255, A: 255}),
-				widget.NewLabel("Template"),
-			)
+			label := widget.NewLabel("Template User")
+			return label
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			label := obj.(*fyne.Container).Objects[1].(*widget.Label)
-			label.SetText(a.users[id])
-			circle := obj.(*fyne.Container).Objects[0].(*canvas.Circle)
-			circle.FillColor = color.NRGBA{G: 255, A: 255}
-			circle.Resize(fyne.NewSize(8, 8))
+			label := obj.(*widget.Label)
+			username := a.users[id]
+
+			// Highlight "me" in bold
+			if strings.HasSuffix(username, " (you)") {
+				label.SetText("• " + username)
+				label.TextStyle = fyne.TextStyle{Bold: true}
+			} else {
+				label.SetText("• " + username)
+				label.TextStyle = fyne.TextStyle{}
+			}
 		},
 	)
-	userScroll := container.NewScroll(a.userList)
-	userContainer := createBorderedContainer(userScroll, "Active")
-	userContainer.Resize(fyne.NewSize(10, 10))
 
-	// Input area
+	userScroll := container.NewScroll(a.userList)
+	userContainer := createSimpleBox(userScroll, "Online Users", color.NRGBA{R: 230, G: 240, B: 255, A: 255})
+
+	// Input area - clean buttons
 	a.input = widget.NewMultiLineEntry()
 	a.input.SetPlaceHolder("Type your message...")
+	a.input.Wrapping = fyne.TextWrapWord
+	a.input.SetMinRowsVisible(3)
 
-	sendBtn := widget.NewButtonWithIcon("Send", theme.MailSendIcon(), nil)
-	sendBtn.Importance = widget.HighImportance
-	sendBtn.OnTapped = func() {
+	// Enable Enter key to send message
+	a.input.OnSubmitted = func(text string) {
 		content := a.input.Text
 		content = ConvertEmojis(content)
 		a.sendMessage(content)
 	}
-	sendFileBtn := widget.NewButtonWithIcon("File", theme.FileIcon(), func() {
+
+	sendBtn := widget.NewButton("Send", func() {
+		content := a.input.Text
+		content = ConvertEmojis(content)
+		a.sendMessage(content)
+	})
+	sendBtn.Importance = widget.HighImportance
+
+	fileBtn := widget.NewButton("Send File", func() {
 		a.showFilePicker()
 	})
 
-	emojiBtn := widget.NewButton("☺", a.showEmojiPicker)
+	emojiBtn := widget.NewButton("😊 Emoji", a.showEmojiPicker)
 
-	inputBox := container.NewBorder(
-		nil, nil,
-		container.NewHBox(emojiBtn, sendFileBtn),
-		sendBtn,
+	// Put send button beside the text box
+	inputWithSend := container.NewBorder(
+		nil, nil, nil, sendBtn,
 		a.input,
 	)
 
-	inputContainer := createBorderedContainer(inputBox, "")
-
-	// Layout
-	right := container.NewBorder(
-		nil, nil, nil, nil,
-		userContainer,
+	buttonBox := container.NewHBox(
+		emojiBtn,
+		fileBtn,
 	)
 
-	content := container.NewBorder(
-		nil,            // top
-		inputContainer, // bottom
-		nil, nil,       // left, right
-		container.NewHSplit(messagesContainer, right),
+	inputBox := container.NewBorder(
+		nil, buttonBox, nil, nil,
+		inputWithSend,
 	)
 
-	a.mainWindow.SetContent(content)
+	// Main layout with clear separation
+	chatArea := container.NewBorder(
+		nil,
+		container.NewVBox(widget.NewSeparator(), inputBox),
+		nil, nil,
+		messagesContainer,
+	)
+
+	split := container.NewHSplit(chatArea, userContainer)
+	split.SetOffset(0.75)
+
+	a.mainWindow.SetContent(split)
 }
 
 func (a *App) showLoginDialog() {
 	username := widget.NewEntry()
 	username.SetPlaceHolder("Enter your username")
 
+	// Enable Enter key to connect
+	username.OnSubmitted = func(text string) {
+		if text != "" {
+			a.attemptLogin(text)
+		}
+	}
+
 	content := container.NewVBox(
-		widget.NewLabel("Welcome to Chat Room"),
+		widget.NewLabel("Welcome to Talkie Chat Room"),
+		widget.NewSeparator(),
+		widget.NewLabel("Username:"),
 		username,
 	)
 
@@ -204,36 +218,38 @@ func (a *App) showLoginDialog() {
 			return
 		}
 
-		// Try to login and connect
-		if err := a.client.Login(username.Text); err != nil {
-			dialog.ShowError(err, a.mainWindow)
+		a.attemptLogin(username.Text)
+	}, a.mainWindow)
+}
+
+func (a *App) attemptLogin(username string) {
+	if err := a.client.Login(username); err != nil {
+		dialog.ShowError(err, a.mainWindow)
+		a.reopenLogin()
+		return
+	}
+
+	if err := a.client.Connect(":9000"); err != nil {
+		if strings.Contains(err.Error(), "username") {
+			dialog.ShowError(fmt.Errorf("login failed: %s", err.Error()), a.mainWindow)
 			a.reopenLogin()
 			return
 		}
 
-		if err := a.client.Connect(":9000"); err != nil {
+		dialog.ShowConfirm("Connection failed",
+			"Cannot connect to server.\nDo you want to retry?",
+			func(confirm bool) {
+				if confirm {
+					a.reopenLogin()
+				} else {
+					a.mainWindow.Close()
+				}
+			},
+			a.mainWindow)
+		return
+	}
 
-			if strings.Contains(err.Error(), "username") {
-				dialog.ShowError(fmt.Errorf("login failed: %s", err.Error()), a.mainWindow)
-				a.reopenLogin()
-				return
-			}
-
-			dialog.ShowConfirm("Connection failed",
-				"Cannot connect to server.\nDo you want to retry?",
-				func(confirm bool) {
-					if confirm {
-						a.reopenLogin()
-					} else {
-						a.mainWindow.Close()
-					}
-				},
-				a.mainWindow)
-			return
-		}
-
-		a.connected = true
-	}, a.mainWindow)
+	a.connected = true
 }
 
 func (a *App) showEmojiPicker() {
@@ -243,15 +259,17 @@ func (a *App) showEmojiPicker() {
 		buttons := []fyne.CanvasObject{}
 		for _, emoji := range group {
 			e := emoji
-			buttons = append(buttons, widget.NewButton(e, func() {
+			btn := widget.NewButton(e, func() {
 				a.input.SetText(a.input.Text + e)
-			}))
+			})
+			buttons = append(buttons, btn)
 		}
-		grid := container.NewGridWithColumns(6, buttons...)
-		tabs.Append(container.NewTabItem(category, grid))
+		grid := container.NewGridWithColumns(8, buttons...)
+		scroll := container.NewVScroll(grid)
+		tabs.Append(container.NewTabItem(category, scroll))
 	}
 
-	dialog.ShowCustom("Emojis", "Close", tabs, a.mainWindow)
+	dialog.ShowCustom("Choose Emoji", "Close", tabs, a.mainWindow)
 }
 
 func GetEmojiList() []string {
@@ -285,7 +303,7 @@ func (a *App) processMessage(msg string) {
 		for i, u := range rawUsers {
 			u = strings.TrimSpace(u)
 			if u == a.client.GetUsername() {
-				a.users[i] = u + " (me)"
+				a.users[i] = u + " (you)"
 			} else {
 				a.users[i] = u
 			}
@@ -294,26 +312,20 @@ func (a *App) processMessage(msg string) {
 		return
 	}
 
+	// Handle public file transfers
 	if idx := strings.Index(msg, "[FILE]"); idx != -1 {
 		s := strings.TrimSpace(msg[idx+len("[FILE]"):])
 		parts := strings.SplitN(s, ":", 2)
 		if len(parts) == 2 {
 			from := strings.TrimSpace(parts[0])
 			filename := strings.TrimSpace(parts[1])
-			btn := widget.NewButton(fmt.Sprintf("⬇ Download %s", filename), func() {
-				a.downloadFile(filename)
-			})
-			box := container.NewVBox(
-				widget.NewLabel(fmt.Sprintf("%s sent a file:", from)),
-				btn,
-			)
-			a.messageList.Add(box)
-			a.messagesScroll.Refresh()
-			a.messagesScroll.ScrollToBottom()
+
+			a.addFileMessage(from, filename, false, "")
 			return
 		}
 	}
 
+	// Handle private file transfers
 	if idx := strings.Index(msg, "[PRIVATE FILE]"); idx != -1 {
 		s := strings.TrimSpace(msg[idx+len("[PRIVATE FILE]"):])
 		if strings.Contains(s, " sent you: ") {
@@ -322,55 +334,77 @@ func (a *App) processMessage(msg string) {
 				from := strings.TrimSpace(parts[0])
 				filename := strings.TrimSpace(parts[1])
 
-				btn := widget.NewButton(fmt.Sprintf("Download %s", filename), func() {
-					a.downloadPrivateFile(filename, from)
-				})
-
-				box := container.NewVBox(
-					widget.NewLabel(fmt.Sprintf("%s sent you a private file:", from)),
-					btn,
-				)
-				box.Objects[0].(*widget.Label).Importance = widget.HighImportance
-
-				a.messageList.Add(box)
-				a.messagesScroll.Refresh()
-				a.messagesScroll.ScrollToBottom()
+				a.addFileMessage(from, filename, true, from)
 				return
 			}
 		}
 	}
 
-	var colorName fyne.ThemeColorName
+	// Regular text messages
+	a.addTextMessage(msg)
+}
 
-	switch {
-	case strings.HasPrefix(msg, "(System)"):
-		colorName = theme.ColorNamePlaceHolder
-	case strings.HasPrefix(msg, "(Global)"):
-		colorName = theme.ColorNameWarning
-	case strings.HasPrefix(msg, "(Private)"):
-		colorName = theme.ColorNamePrimary
-	default:
-		colorName = theme.ColorNameForeground
+func (a *App) addFileMessage(from, filename string, isPrivate bool, sender string) {
+	// Simple file message with download button
+	var header string
+	if isPrivate {
+		header = fmt.Sprintf("📁 Private file from %s: %s", from, filename)
+	} else {
+		header = fmt.Sprintf("📁 %s shared: %s", from, filename)
 	}
 
+	headerLabel := widget.NewLabel(header)
+	headerLabel.Wrapping = fyne.TextWrapWord
+
+	var downloadBtn *widget.Button
+	if isPrivate {
+		downloadBtn = widget.NewButton("⬇ Download File", func() {
+			a.downloadPrivateFile(filename, sender)
+		})
+	} else {
+		downloadBtn = widget.NewButton("⬇ Download File", func() {
+			a.downloadFile(filename)
+		})
+	}
+	downloadBtn.Importance = widget.HighImportance
+
+	fileBox := container.NewVBox(
+		headerLabel,
+		downloadBtn,
+		widget.NewSeparator(),
+	)
+
+	a.messageList.Add(fileBox)
+	a.messagesScroll.Refresh()
+	a.messagesScroll.ScrollToBottom()
+}
+
+func (a *App) addTextMessage(msg string) {
+	// Determine message color based on type
 	displayMsg := msg
 	prefix := a.client.GetUsername() + ":"
+
+	var msgColor color.Color
+
 	if strings.HasPrefix(msg, prefix) {
-		displayMsg = strings.Replace(msg, prefix, prefix+" (me):", 1)
+		displayMsg = strings.Replace(msg, prefix, prefix+" (you)", 1)
+		msgColor = color.NRGBA{R: 0, G: 100, B: 0, A: 255} // Dark green for own messages
+	} else if strings.HasPrefix(msg, "(System)") {
+		msgColor = color.NRGBA{R: 100, G: 100, B: 100, A: 255} // Gray for system
+	} else if strings.HasPrefix(msg, "(Global)") {
+		msgColor = color.NRGBA{R: 0, G: 0, B: 200, A: 255} // Blue for global
+	} else if strings.HasPrefix(msg, "(Private)") {
+		msgColor = color.NRGBA{R: 150, G: 0, B: 150, A: 255} // Purple for private
+	} else {
+		msgColor = color.Black // Black for normal messages
 	}
 
-	segment := &widget.TextSegment{
-		Style: widget.RichTextStyle{
-			ColorName: colorName,
-			Inline:    true,
-		},
-		Text: displayMsg + "\n",
-	}
+	// Create colored text
+	msgText := canvas.NewText(displayMsg, msgColor)
+	msgText.TextSize = 14
+	msgText.Alignment = fyne.TextAlignLeading
 
-	msgRichText := widget.NewRichText(segment)
-	msgRichText.Wrapping = fyne.TextWrapWord
-
-	a.messageList.Add(msgRichText)
+	a.messageList.Add(msgText)
 	a.messagesScroll.Refresh()
 	a.messagesScroll.ScrollToBottom()
 }
@@ -381,7 +415,7 @@ func (a *App) downloadFile(filename string) {
 			dialog.ShowError(fmt.Errorf("failed to request file: %v", err), a.mainWindow)
 			return
 		}
-		dialog.ShowInformation("Downloading", fmt.Sprintf("Downloading %s...", filename), a.mainWindow)
+		dialog.ShowInformation("Download", fmt.Sprintf("Downloading %s...", filename), a.mainWindow)
 	}()
 }
 
@@ -391,7 +425,7 @@ func (a *App) downloadPrivateFile(filename, sender string) {
 			dialog.ShowError(fmt.Errorf("failed to request private file: %v", err), a.mainWindow)
 			return
 		}
-		dialog.ShowInformation("Downloading", fmt.Sprintf("Downloading private file %s from %s...", filename, sender), a.mainWindow)
+		dialog.ShowInformation("Download", fmt.Sprintf("Downloading %s from %s...", filename, sender), a.mainWindow)
 	}()
 }
 
@@ -431,91 +465,101 @@ func (a *App) reopenLogin() {
 }
 
 func (a *App) showFilePicker() {
-	options := []string{"Public", "Private"}
+	options := []string{"Send to Everyone (Public)", "Send to One Person (Private)"}
 	selected := widget.NewSelect(options, nil)
-	selected.SetSelected("Public")
+	selected.SetSelected("Send to Everyone (Public)")
 
 	recipient := widget.NewEntry()
-	recipient.SetPlaceHolder("Enter recipient username (for Private only)")
+	recipient.SetPlaceHolder("Enter username")
 	recipient.Disable()
 
+	// Enable Enter key to proceed
+	recipient.OnSubmitted = func(text string) {
+		if selected.Selected == "Send to One Person (Private)" && text != "" {
+			a.proceedWithFilePicker(selected.Selected, text)
+		}
+	}
+
 	selected.OnChanged = func(value string) {
-		if value == "Private" {
+		if value == "Send to One Person (Private)" {
 			recipient.Enable()
 		} else {
 			recipient.Disable()
 		}
 	}
 
+	content := container.NewVBox(
+		widget.NewLabel("Choose who can see this file:"),
+		selected,
+		widget.NewLabel("Recipient username (for private only):"),
+		recipient,
+	)
+
 	dialog.ShowCustomConfirm(
 		"Send File",
-		"Next",
+		"Choose File",
 		"Cancel",
-		container.NewVBox(
-			widget.NewLabel("Choose how to send your file:"),
-			selected,
-			recipient,
-		),
+		content,
 		func(confirm bool) {
 			if !confirm {
 				return
 			}
 
 			toUser := strings.TrimSpace(recipient.Text)
-
-			if selected.Selected == "Private" {
-				if toUser == "" {
-					dialog.ShowError(fmt.Errorf("recipient username is required"), a.mainWindow)
-					return
-				}
-				if !a.client.UserExists(toUser) {
-					dialog.ShowError(fmt.Errorf("user '%s' not found", toUser), a.mainWindow)
-					return
-				}
-			}
-
-			dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
-				if err != nil {
-					dialog.ShowError(err, a.mainWindow)
-					return
-				}
-				if reader == nil {
-					return
-				}
-				filePath := reader.URI().Path()
-				reader.Close()
-
-				go func() {
-					uploadMsg := widget.NewLabel(fmt.Sprintf("Uploading file: %s...", filepath.Base(filePath)))
-					a.messageList.Add(uploadMsg)
-					a.messageList.Refresh()
-
-					var sendErr error
-					if selected.Selected == "Private" {
-						toUser := strings.TrimSpace(recipient.Text)
-						if toUser == "" {
-							dialog.ShowError(fmt.Errorf("recipient username is required for private file"), a.mainWindow)
-							return
-						}
-						sendErr = a.client.SendPrivateFile(filePath, toUser)
-					} else {
-						sendErr = a.client.SendFile(filePath)
-					}
-
-					if sendErr != nil {
-						dialog.ShowError(fmt.Errorf("failed to send file: %v", sendErr), a.mainWindow)
-						return
-					}
-
-					fyne.CurrentApp().SendNotification(&fyne.Notification{
-						Title:   "File Sent",
-						Content: fmt.Sprintf("%s uploaded successfully", filepath.Base(filePath)),
-					})
-
-					a.messageList.Refresh()
-				}()
-			}, a.mainWindow)
+			a.proceedWithFilePicker(selected.Selected, toUser)
 		},
 		a.mainWindow,
 	)
+}
+
+func (a *App) proceedWithFilePicker(selectedOption, toUser string) {
+	isPrivate := selectedOption == "Send to One Person (Private)"
+
+	if isPrivate {
+		if toUser == "" {
+			dialog.ShowError(fmt.Errorf("please enter recipient username"), a.mainWindow)
+			return
+		}
+		if !a.client.UserExists(toUser) {
+			dialog.ShowError(fmt.Errorf("user '%s' not found", toUser), a.mainWindow)
+			return
+		}
+	}
+
+	dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
+		if err != nil {
+			dialog.ShowError(err, a.mainWindow)
+			return
+		}
+		if reader == nil {
+			return
+		}
+		filePath := reader.URI().Path()
+		reader.Close()
+
+		go func() {
+			statusLabel := widget.NewLabel(fmt.Sprintf("⏳ Uploading %s...", filepath.Base(filePath)))
+			a.messageList.Add(statusLabel)
+			a.messageList.Refresh()
+
+			var sendErr error
+			if isPrivate {
+				sendErr = a.client.SendPrivateFile(filePath, toUser)
+			} else {
+				sendErr = a.client.SendFile(filePath)
+			}
+
+			if sendErr != nil {
+				dialog.ShowError(fmt.Errorf("failed to send file: %v", sendErr), a.mainWindow)
+				return
+			}
+
+			fyne.CurrentApp().SendNotification(&fyne.Notification{
+				Title:   "File Sent",
+				Content: fmt.Sprintf("%s sent successfully", filepath.Base(filePath)),
+			})
+
+			a.messageList.Refresh()
+		}()
+	}, a.mainWindow)
 }
