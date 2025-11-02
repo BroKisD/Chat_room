@@ -456,9 +456,15 @@ func (a *App) showFilePicker() {
 
 			toUser := strings.TrimSpace(recipient.Text)
 
-			if !a.client.UserExists(toUser) {
-				dialog.ShowError(fmt.Errorf("user not found"), a.mainWindow)
-				return
+			if selected.Selected == "Private" {
+				if toUser == "" {
+					dialog.ShowError(fmt.Errorf("recipient username is required"), a.mainWindow)
+					return
+				}
+				if !a.client.UserExists(toUser) {
+					dialog.ShowError(fmt.Errorf("user '%s' not found", toUser), a.mainWindow)
+					return
+				}
 			}
 
 			dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
