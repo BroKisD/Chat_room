@@ -43,6 +43,7 @@ func (c *Client) SetMessageHandler(handler func(msg string)) {
 }
 
 func (c *Client) GetUsername() string {
+	c.username = strings.TrimSpace(c.username)
 	return c.username
 }
 
