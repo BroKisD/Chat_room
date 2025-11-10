@@ -23,8 +23,3 @@ func (h *EventHandler) HandleSendMessage(content string) error {
 	}
 	return h.client.SendMessage(msg)
 }
-
-func (h *EventHandler) HandleFileUpload(filePath string) error {
-	// File upload implementation
-	return nil
-}
