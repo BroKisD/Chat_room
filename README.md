@@ -49,13 +49,6 @@ go run cmd/server/main.go
 go run cmd/client/main.go
 ```
 
-- **Build binaries**:
-
-```bash
-go build -o bin/chat-server ./cmd/server
-go build -o bin/chat-client ./cmd/client
-```
-
 **List of Necessary Dependencies**
 
 - **Go toolchain**: `go` (version `1.21` recommended).
@@ -68,19 +61,20 @@ go build -o bin/chat-client ./cmd/client
 	- A desktop environment for the GUI client (X11 / Wayland on Linux).
 	- Network connectivity between client and server hosts.
 
-**Media / Demo**
+<!-- Login page -->
+<h3>Login page (GUI image)</h3>
+<img src="./assets/Login_page.png" alt="Login Page" width="500" />
 
-- **Login page (GUI image)**
+<!-- Main GUI -->
+<h3>Main GUI (after login)</h3>
+<img src="./assets/main_GUI.png" alt="Main GUI" width="500" />
 
-#file:Login_page.png
-
-- **Main GUI (after login)**
-
-#file:main_GUI.png
-
-- **Demo video**
-
-#file:Computer_Networks_Demo.mp4
+<!-- Demo video -->
+<h3>Demo video</h3>
+<video width="640" height="360" controls>
+  <source src="./assets/Computer_Networks_Demo.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
 
 **Quick Troubleshooting**
 
@@ -137,14 +131,3 @@ go run cmd/server/main.go -n
 go run cmd/client/main.go
 ```
 
-**Contributing / Development notes**
-
-- To add a command-line option to the client to specify server address, edit `cmd/client/main.go` to parse flags
-	and pass the address into the GUI or `client.Connect()` call.
-- Use `go test ./...` to run unit tests where present. Keep changes small and test the GUI manually after UI changes.
-
----
-
-If you'd like, I can:
-- make the client accept a `--server` flag or `CHATROOM_SERVER` env var and update the GUI to use it, or
-- add a `Makefile` with common targets (`build`, `run-server`, `run-client`, `clean`).
