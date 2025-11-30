@@ -71,9 +71,9 @@ go run cmd/client/main.go
 
 <!-- Demo video -->
 <h3>Demo video</h3>
-<video width="640" height="360" controls>
-  <source src="./assets/Computer_Networks_Demo.mp4" type="video/mp4">
-  Your browser does not support the video tag.
+Click below to download or view the demo:
+
+[Computer_Networks_Demo.mp4](./assets/Computer_Networks_Demo.mp4)
 </video>
 
 **Quick Troubleshooting**
