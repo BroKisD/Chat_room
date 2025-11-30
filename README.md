@@ -4,6 +4,8 @@ A feature-rich chat room application written in Go. It provides real-time messag
 transfer, end-to-end encryption, emoji support, user sessions, and a desktop GUI built with
 the Fyne framework.
 
+![Report for details here](./assets/ComputerNetwork_Report.pdf)
+
 **Project Structure**
 
 ```
